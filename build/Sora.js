@@ -1,4 +1,4 @@
-var Sora = {};
+var Sora = {}, gl;
 
 Sora.extend = function (obj, source) {
     if (Object.keys) {
@@ -224,9 +224,10 @@ String.prototype.toVector2 = String.prototype.toVector2 || function () {
     return new Sora.Vector2();
 };
 
-Sora.Layer = function (origin, size, rotation, color, alpha) {
+Sora.Layer = function (origin, size, anchor, rotation, color, alpha) {
     this.origin = origin || new Vector2();
     this.size = size || new Vector2(Sora.width, Sora.height);
+    this.anchor = anchor || new Vector2();
     this.rotation = rotation || 0;
     this.color = color || new Color();
     this.alpha = alpha || 1;
@@ -236,12 +237,18 @@ Sora.Layer = function (origin, size, rotation, color, alpha) {
 };
 Sora.extend(Sora.Layer.prototype, {
     addSublayer: function (layer) {
+        if (!layer || layer == this) return ;
+        if (layer.superlayer) layer.removeFromSuperlayer();
         
     },
     removeFromSuperlayer: function () {
         
+        this.superlayer = null;
     },
     draw: function () {
+        
+    },
+    visit: function () {
         
     },
     mouseDown: function (event) {
@@ -279,8 +286,39 @@ Sora.extend(Sora.Layer.prototype, {
     },
 });
 
-Sora.Button = function (origin, size, rotation, color, alpha) {
-    Sora.Layer.call(this, origin, size, rotation, color, alpha);
+Sora.IMAGE = 0x0;
+Sora.VIDEO = 0x1;
+Sora.ImageLayer = function (origin, size, anchor, rotation, color, alpha, url, type) {
+    Sora.Layer.call(this, origin, size, anchor, rotation, color, alpha);
+    var element;
+    if (type === undefined || type == Sora.IMAGE)
+        element = new Image();
+    else
+        element = document.createElement('video');
+    var scope = this;
+    element.onload = function () {
+        scope.texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, scope.texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.UNSIGNED_BYTE, element);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+    };
+    element.src = url;
+    return this;
+};
+Sora.ImageLayer.prototype = Object.create(Sora.Layer);
+Sora.extend(Sora.ImageLayer.prototype, {
+    draw: function () {
+        if (this.texture) {
+            
+        }
+    },
+});
+
+Sora.Button = function (origin, size, anchor, rotation, color, alpha) {
+    Sora.Layer.call(this, origin, size, anchor, rotation, color, alpha);
     return this;
 };
 Sora.Button.prototype = Object.create(Sora.Layer);
@@ -347,11 +385,18 @@ Sora.extend(Sora.Animation.prototype, {
             t = this.repeat - parseInt(this.repeat) || 1;
         else
             t = (((this.elapsed - 1) % this.duration) + 1) / this.duration;
+        // autorev
         t = Math.max(0, Math.min(1, t));
         this.update(this.timmingFunc(t, this.reverse));
     },
     finished: function () {
         return this.elapsed >= this.repeat * this.duration;
+    },
+    remain: function () {
+        if (this.elapsed <= parseInt(this.repeat) * this.duration)
+            return this.duration - ((this.elapsed - 1) % this.duration + 1);
+        else
+            return this.repeat * this.duration - this.elapsed;
     },
 });
 
@@ -389,15 +434,59 @@ Sora.resize = function (event) {
     Sora.canvas.style.height = height + 'px';
     Sora.canvas.style.marginLeft = (window.innerWidth - width) * 0.5 + 'px';
     Sora.canvas.style.marginTop = (window.innerHeight - height) * 0.5 + 'px';
+    if (gl) {
+        gl.viewport(0, 0, width, height);
+    }
+};
+
+Sora.render = function () {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
 };
 
 Sora.animate = function (currTime) {
-    var dt = Math.max(0, Math.min(33, currTime - Sora.lastTime));
-    Sora.lastTime = currTime;
-    
-    Sora.gl.clear(Sora.gl.COLOR_BUFFER_BIT);
-    
+    if (Sora.lastTime === undefined) {
+        Sora.lastTime = currTime;
+    }
+    else {
+        var dt = Math.max(0, Math.min(33, currTime - Sora.lastTime));
+        Sora.lastTime = currTime;
+        Sora.animations.sort(function (a, b) { return a.remain() - b.remain(); });
+        for (var i = 0 ; i < Sora.animations.length ;) {
+            Sora.animations[i].step(dt);
+            if (Sora.animations[i].finished()) Sora.animations.splice(i, 1);
+            else ++i;
+        }
+        Sora.render();
+    }
     window.requestAnimationFrame(Sora.animate);
+};
+
+Sora.vertexShaderSource = [
+
+].join('\n');
+Sora.fragmentShaderSource = [
+
+].join('\n');
+Sora.createShader = function (source, type) {
+    var shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        alert(gl.getShaderInfoLog(shader));
+        return null;
+    }
+    return shader;
+};
+
+Sora.matrixMode = function (mode) {
+    
+};
+Sora.pushMatrix = function () {
+    
+};
+Sora.popMatrix = function () {
+    
 };
 
 window.onload = function () {
@@ -408,18 +497,31 @@ window.onload = function () {
     Sora.canvas = document.createElement('canvas');
     Sora.resize();
     document.body.appendChild(Sora.canvas);
-    Sora.gl = Sora.canvas.getContext('experimental-webgl');
-    if (!Sora.gl) return ;
-    Sora.gl.clearColor(0, 0, 0, 1);
-    Sora.gl.enable(Sora.gl.BLEND);
-    Sora.gl.blendEquation(Sora.gl.FUNC_ADD);
-    Sora.gl.blendFunc(Sora.gl.SRC_ALPHA, Sora.gl.ONE_MINUS_SRC_ALPHA);
+    gl = Sora.canvas.getContext('experimental-webgl');
+    if (!gl) {
+        alert('Couldn\'t get webgl context');
+        return ;
+    }
+    gl.clearColor(0, 0, 0, 1);
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    Sora.vertexShader = Sora.createShader(Sora.vertexShaderSource, gl.VERTEX_SHADER);
+    Sora.fragmentShader = Sora.createShader(Sora.fragmentShaderSource, gl.FRAGMENT_SHADER);
+    Sora.shaderProgram = gl.createProgram();
+    gl.attachShader(Sora.shaderProgram, Sora.vertexShader);
+    gl.attachShader(Sora.shaderProgram, Sora.fragmentShader);
+    gl.linkProgram(Sora.shaderProgram);
+    if (!gl.getProgramParameter(Sora.shaderProgram, gl.LINK_STATUS)) {
+        alert('Couldn\'t initialize shader program');
+        return ;
+    }
+    gl.useProgram(Sora.shaderProgram);
     Sora.canvas.addEventListener('mousedown', Sora.mouseDown, false);
     Sora.canvas.addEventListener('mouseup', Sora.mouseUp, false);
     Sora.canvas.addEventListener('mousemove', Sora.mouseMove, false);
     Sora.canvas.addEventListener('keydown', Sora.keyDown, false);
     Sora.canvas.addEventListener('keyup', Sora.keyUp, false);
     window.addEventListener('resize', Sora.resize, false);
-    Sora.lastTime = Date.now();
     window.requestAnimationFrame(Sora.animate);
 };
