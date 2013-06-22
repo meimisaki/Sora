@@ -97,6 +97,9 @@ Sora.extend(Sora.Color.prototype, {
     blend: function (c) {
         this.r *= c.r, this.g *= r.g, this.b *= r.b;
     },
+    equalTo: function (c) {
+        return this.r == c.r && this.g == c.g && this.b == c.b;
+    },
     toArray: function () {
         return [this.r, this.g, this.b];
     },
@@ -134,9 +137,10 @@ Sora.extend(Sora.Color.prototype, {
     },
 });
 Array.prototype.toColor = Array.prototype.toColor || function () {
-    var r = this.length >= 1 ? this[0] : 0;
-    var g = this.length >= 2 ? this[1] : 0;
-    var b = this.length >= 3 ? this[2] : 0;
+    var l;
+    var r = l >= 1 ? this[0] : 0;
+    var g = l >= 2 ? this[1] : 0;
+    var b = l >= 3 ? this[2] : 0;
     return new Sora.Color().setRGB(r, g, b);
 };
 String.prototype.toColor = String.prototype.toColor || function () {
@@ -201,7 +205,7 @@ Sora.extend(Sora.Vector2.prototype, {
         return Math.sqrt(this.distanceToSquared(v));
     },
     equalTo: function (v) {
-        return this.x === v.x && this.y === v.y;
+        return this.x == v.x && this.y == v.y;
     },
     toArray: function () {
         return [this.x, this.y];
@@ -211,8 +215,9 @@ Sora.extend(Sora.Vector2.prototype, {
     },
 });
 Array.prototype.toVector2 = Array.prototype.toVector2 || function () {
-    var x = this.length >= 1 ? this[0] : 0;
-    var y = this.length >= 2 ? this[1] : 0;
+    var l = this.length;
+    var x = l >= 1 ? this[0] : 0;
+    var y = l >= 2 ? this[1] : 0;
     return new Sora.Vector2(x, y);
 };
 String.prototype.toVector2 = String.prototype.toVector2 || function () {
@@ -222,6 +227,74 @@ String.prototype.toVector2 = String.prototype.toVector2 || function () {
         return new Sora.Vector2(parseFloat(v[1]), parseFloat(v[2]));
     }
     return new Sora.Vector2();
+};
+
+Sora.Matrix4 = function (m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44) {
+    this.set(m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44);
+    return this;
+};
+Sora.extend(Sora.Matrix4.prototype, {
+    set : function (m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44) {
+        this.m11 = m11 || 0, this.m12 = m12 || 0, this.m13 = m13 || 0, this.m14 = m14 || 0;
+        this.m21 = m21 || 0, this.m22 = m22 || 0, this.m23 = m23 || 0, this.m24 = m24 || 0;
+        this.m31 = m31 || 0, this.m32 = m32 || 0, this.m33 = m33 || 0, this.m34 = m34 || 0;
+        this.m41 = m41 || 0, this.m42 = m42 || 0, this.m43 = m43 || 0, this.m44 = m44 || 0;
+        return this;
+    },
+    add: function (m) {
+        
+        return this;
+    },
+    sub: function (m) {
+        
+        return this;
+    },
+    mul: function (m) {
+        
+        return this;
+    },
+    identity: function () {
+        this.set(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+        return this;
+    },
+    equalTo: function (m) {
+        return this.m11 == m.m11 && this.m12 == m.m12 && this.m13 == m.m13 && this.m14 == m.m14 &&
+               this.m21 == m.m21 && this.m22 == m.m22 && this.m23 == m.m23 && this.m24 == m.m24 &&
+               this.m31 == m.m31 && this.m32 == m.m32 && this.m33 == m.m33 && this.m34 == m.m34 &&
+               this.m41 == m.m41 && this.m42 == m.m42 && this.m43 == m.m43 && this.m44 == m.m44;
+    },
+    toArray: function () {
+        return [this.m11, this.m12, this.m13, this.m14,
+                this.m21, this.m22, this.m23, this.m24,
+                this.m31, this.m32, this.m33, this.m34,
+                this.m41, this.m42, this.m43, this.m44];
+    },
+    toString: function () {
+        
+    },
+});
+Array.prototype.toMatrix4 = Array.prototype.toMatrix4 || function () {
+    var l = this.length;
+    var m11 = l >= 1 ? this[0] : 0;
+    var m12 = l >= 2 ? this[1] : 0;
+    var m13 = l >= 3 ? this[2] : 0;
+    var m14 = l >= 4 ? this[3] : 0;
+    var m21 = l >= 5 ? this[4] : 0;
+    var m22 = l >= 6 ? this[5] : 0;
+    var m23 = l >= 7 ? this[6] : 0;
+    var m24 = l >= 8 ? this[7] : 0;
+    var m31 = l >= 9 ? this[8] : 0;
+    var m32 = l >= 10 ? this[9] : 0;
+    var m33 = l >= 11 ? this[10] : 0;
+    var m34 = l >= 12 ? this[11] : 0;
+    var m41 = l >= 13 ? this[12] : 0;
+    var m42 = l >= 14 ? this[13] : 0;
+    var m43 = l >= 15 ? this[14] : 0;
+    var m44 = l >= 16 ? this[15] : 0;
+    return new Sora.Matrix4(m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44);
+};
+String.prototype.toMatrix4 = String.prototype.toMatrix4 || function () {
+    
 };
 
 Sora.Layer = function (origin, size, anchor, rotation, color, alpha) {
@@ -463,10 +536,12 @@ Sora.animate = function (currTime) {
 };
 
 Sora.vertexShaderSource = [
-
+    'void main(void) {',
+    '}',
 ].join('\n');
 Sora.fragmentShaderSource = [
-
+    'void main(void) {',
+    '}',
 ].join('\n');
 Sora.createShader = function (source, type) {
     var shader = gl.createShader(type);
@@ -477,6 +552,13 @@ Sora.createShader = function (source, type) {
         return null;
     }
     return shader;
+};
+
+Sora.perspective = function (fovy, aspect, zNear, zFar) {
+    
+};
+Sora.lookAt = function (eye, center, up) {
+    
 };
 
 Sora.matrixMode = function (mode) {
