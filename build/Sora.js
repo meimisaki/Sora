@@ -15,7 +15,7 @@
     }
     window.cancelAnimationFrame = window.cancelAnimationFrame || function (id) { window.clearTimeout(id) };
 }());
-var canvas, gl, width, height;
+var canvas, gl, width, height, foreLayer, backLayer;
 function resize(event) {
     var canvasWidth = window.innerWidth, canvasHeight = window.innerHeight, aspect = width / height;
     if (canvasWidth < canvasHeight * aspect) canvasHeight = canvasWidth / aspect;
@@ -29,7 +29,10 @@ function resize(event) {
 }
 function render() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
+    pushMatrix();
+    translate(-1, -height / width, -1);
+    foreLayer.visit();
+    popMatrix();
 }
 function animate(currTime) {
     render();
@@ -37,26 +40,29 @@ function animate(currTime) {
 }
 var vertexShaderSource = [
     'attribute vec3 a_VertexPos;',
+    'attribute vec4 a_VertexColor;',
     'attribute vec2 a_TexCoord;',
+    'varying vec4 v_VertexColor;',
     'varying vec2 v_TexCoord;',
     'uniform mat4 u_ProjectMatrix;',
     'uniform mat4 u_ModelViewMatrix;',
     'void main(void) {',
     '    gl_Position = u_ProjectMatrix * u_ModelViewMatrix * vec4(a_VertexPos, 1);',
+    '    v_VertexColor = a_VertexColor;',
     '    v_TexCoord = a_TexCoord;',
     '}',
 ].join('\n');
 var fragmentShaderSource = [
     'precision mediump float;',
+    'varying vec4 v_VertexColor;',
     'varying vec2 v_TexCoord;',
-    'uniform vec4 u_Color;',
     'uniform sampler2D u_Texture2D;',
     'void main(void) {',
-    '    gl_FragColor = u_Color * texture2D(u_Texture2D, v_TexCoord);',
+    '    gl_FragColor = v_VertexColor * texture2D(u_Texture2D, v_TexCoord);',
     '}',
 ].join('\n');
 var vertexShader, fragmentShader, shaderProgram;
-var aVertexPos, aTexCoord, uProjectMatrix, uModelViewMatrix, uColor, uTexture2D;
+var aVertexPos, aVertexColor, aTexCoord, uProjectMatrix, uModelViewMatrix, uTexture2D;
 var uModelViewMatrices = [mat4.create()];
 function perspective(fov, aspect, near, far) {
     var m = mat4.create();
@@ -99,10 +105,6 @@ function scale(x, y, z) {
     mat4.scale(m, m, vec3.fromValues(x, y, z));
     gl.uniformMatrix4fv(uModelViewMatrix, false, m);
 }
-function color(r, g, b, a) {
-    r = r || 0, g = g || 0, b = b || 0, a = a || 0;
-    gl.uniform4f(uColor, r, g, b, a);
-}
 function createShader(source, type) {
     var shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -114,50 +116,86 @@ function createShader(source, type) {
     return shader;
 }
 var sharedTexCoordBuffer;
-var Layer = function (url, type, origin, size, color, rotation, anchor) {
+var Layer = function (url, type, origin, size, color, rotation, scale, anchor, order) {
     this.origin = origin ? origin : vec2.create();
     this.size = size ? size : vec2.create();
-    this.color = color ? color : vec4.create();
-    this.rotation = rotation ? rotation : vec3.create();
+    this.color = color ? color : vec4.fromValues(1, 1, 1, 1);
+    this.rotation = rotation ? rotation : 0;
+    this.scale = scale ? scale : vec2.create();
     this.anchor = anchor ? anchor : vec2.create();
+    this.order = order ? order : 0;
+    this.sublayers = [];
+    this.superlayer = null;
     this.vertexPosBuffer = gl.createBuffer();
+    this.vertexColorBuffer = gl.createBuffer();
     this.texture = null;
-    var element, scope = this;
-    element = new Image();
-    element.onload = function () {
-        scope.texture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, scope.texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-    };
-    element.src = url;
+    if (url) {
+        var element = new Image(), scope = this;
+        element.onload = function () {
+            scope.texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, scope.texture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+        };
+        element.src = url;
+    }
     return this;
 };
 Layer.prototype = {
     constructor: Layer,
+    addSublayer: function (layer) {
+        var i = 0;
+        for (; i < this.sublayers.length ; ++i)
+            if (layer.order < this.sublayers[i].order)
+                break;
+        this.sublayers.splice(i, 0, layer);
+    },
     draw: function () {
         if (this.texture) {
             gl.bindTexture(gl.TEXTURE_2D, this.texture);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexPosBuffer);
-            var vertices = [
-                -1, -1, 0,
-                1, -1, 0,
-                1, 1, 0,
-                -1, -1, 0,
-                1, 1, 0,
-                -1, 1, 0,
-            ];
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
+            var w = this.size[0] / width * 2, h = this.size[1] / width * 2;
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, w, 0, 0, w, h, 0, 0, 0, 0, w, h, 0, 0, h, 0]), gl.STREAM_DRAW);
             gl.vertexAttribPointer(aVertexPos, 3, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexColorBuffer);
+            var r = this.color[0], g = this.color[1], b = this.color[2], a = this.color[3];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a]), gl.STREAM_DRAW);
+            gl.vertexAttribPointer(aVertexColor, 4, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, sharedTexCoordBuffer);
             gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 0, 0);
             gl.drawArrays(gl.TRIANGLES, 0, 6);
             gl.bindTexture(gl.TEXTURE_2D, null);
         }
+    },
+    visit: function () {
+        pushMatrix();
+        var tx = this.size[0] * this.anchor[0] * 2 / width, ty = this.size[1] * this.anchor[1] * 2 / width;
+        translate(tx + this.origin[0] * 2 / width, ty + this.origin[1] * 2 / width);
+        rotate(0, 0, this.rotation);
+        scale(this.scale[0], this.scale[1]);
+        translate(-tx, -ty);
+        var color = vec4.clone(this.color);
+        if (this.superlayer) vec4.mul(this.color, this.color, this.superlayer.color);
+        var i = 0;
+        for (; i < this.sublayers.length ; ++i) {
+            if (this.sublayers[i].order >= 0) break;
+            this.sublayers[i].visit();
+        }
+        this.draw();
+        for (; i < this.sublayers.length ; ++i) this.sublayers[i].visit();
+        vec4.copy(this.color, color);
+        popMatrix();
+    },
+    dealloc: function () {
+        for (var i in this.sublayers) i.dealloc();
+        gl.deleteBuffer(this.vertexPosBuffer);
+        gl.deleteBuffer(this.vertexColorBuffer);
+        if (this.texture) gl.deleteTexture(this.texture);
     },
 };
 function timmingLinear(t, r) {
@@ -192,7 +230,24 @@ var Action = function (target, duration, repeat, reverse, autorev, timming) {
 };
 Action.prototype = {
     constructor: Action,
-    
+    start: function () {
+        
+    },
+    stop: function () {
+        
+    },
+    update: function (t) {
+        
+    },
+    step: function (dt) {
+        
+    },
+    finished: function () {
+        
+    },
+    remain: function () {
+        
+    },
 };
 window.onload = function () {
     document.body.style.marginLeft = '0px';
@@ -224,11 +279,12 @@ window.onload = function () {
     gl.useProgram(shaderProgram);
     aVertexPos = gl.getAttribLocation(shaderProgram, 'a_VertexPos');
     gl.enableVertexAttribArray(aVertexPos);
+    aVertexColor = gl.getAttribLocation(shaderProgram, 'a_VertexColor');
+    gl.enableVertexAttribArray(aVertexColor);
     aTexCoord = gl.getAttribLocation(shaderProgram, 'a_TexCoord');
     gl.enableVertexAttribArray(aTexCoord);
     uProjectMatrix = gl.getUniformLocation(shaderProgram, 'u_ProjectMatrix');
     uModelViewMatrix = gl.getUniformLocation(shaderProgram, 'u_ModelViewMatrix');
-    uColor = gl.getUniformLocation(shaderProgram, 'u_Color');
     uTexture2D = gl.getUniformLocation(shaderProgram, 'u_Texture2D');
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(uTexture2D, 0);
@@ -238,9 +294,14 @@ window.onload = function () {
     width = 1280, height = 720;
     resize();
     document.body.appendChild(canvas);
-    perspective(60, width / height, 1, 1024);
+    perspective(45, width / height, 1, 2);
     loadIdentity();
-    color(1, 1, 1, 1);
     window.addEventListener('resize', resize, false);
+    foreLayer = new Layer(null, null, null, vec2.fromValues(width, height));
     window.requestAnimationFrame(animate);
+};
+window.onunload = function () {
+    if (!gl) return ;
+    gl.deleteBuffer(sharedTexCoordBuffer);
+    
 };
