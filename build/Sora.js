@@ -47,7 +47,7 @@ var vertexShaderSource = [
     'uniform mat4 u_ProjectMatrix;',
     'uniform mat4 u_ModelViewMatrix;',
     'void main(void) {',
-    '    gl_Position = u_ProjectMatrix * u_ModelViewMatrix * vec4(a_VertexPos, 1);',
+    '    gl_Position = u_ProjectMatrix * u_ModelViewMatrix * vec4(a_VertexPos, 1.0);',
     '    v_VertexColor = a_VertexColor;',
     '    v_TexCoord = a_TexCoord;',
     '}',
@@ -56,13 +56,23 @@ var fragmentShaderSource = [
     'precision mediump float;',
     'varying vec4 v_VertexColor;',
     'varying vec2 v_TexCoord;',
+    'uniform bool u_Mask2DEnabled;',
+    'uniform float u_Mask2DProgress;',
+    'uniform sampler2D u_Mask2D;',
     'uniform sampler2D u_Texture2D;',
     'void main(void) {',
-    '    gl_FragColor = v_VertexColor * texture2D(u_Texture2D, v_TexCoord);',
+    '    vec4 color = v_VertexColor * texture2D(u_Texture2D, v_TexCoord);',
+    '    if (u_Mask2DEnabled)',
+    '        if (texture2D(u_Mask2D, v_TexCoord).x < u_Mask2DProgress)',
+    '            gl_FragColor = vec4(color.xyz, 0.0);',
+    '        else',
+    '            gl_FragColor = vec4(color.xyz, 1.0);',
+    '    else',
+    '        gl_FragColor = color;',
     '}',
 ].join('\n');
 var vertexShader, fragmentShader, shaderProgram;
-var aVertexPos, aVertexColor, aTexCoord, uProjectMatrix, uModelViewMatrix, uTexture2D;
+var aVertexPos, aVertexColor, aTexCoord, uProjectMatrix, uModelViewMatrix, uMask2DEnabled, uMask2DProgress, uMask2D, uTexture2D;
 var uModelViewMatrices = [mat4.create()];
 function perspective(fov, aspect, near, far) {
     var m = mat4.create();
@@ -105,6 +115,20 @@ function scale(x, y, z) {
     mat4.scale(m, m, vec3.fromValues(x, y, z));
     gl.uniformMatrix4fv(uModelViewMatrix, false, m);
 }
+function enableMask2D() {
+    gl.uniform1i(uMask2DEnabled, 1);
+}
+function disableMask2D() {
+    gl.uniform1i(uMask2DEnabled, 0);
+}
+function setMask2DProgress(f) {
+    gl.uniform1f(uMask2DProgress, f);
+}
+function bindMask2D(texture) {
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.activeTexture(gl.TEXTURE1);
+}
 function createShader(source, type) {
     var shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -115,35 +139,36 @@ function createShader(source, type) {
     }
     return shader;
 }
+function createTexture(url, type) {
+    if (!url) return null;
+    var texture = gl.createTexture(), element = new Image();
+    element.onload = function () {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+    };
+    element.src = url;
+    return texture;
+}
 var sharedTexCoordBuffer;
 var Layer = function (url, type, origin, size, color, rotation, scale, anchor, order) {
     this.origin = origin ? origin : vec2.create();
     this.size = size ? size : vec2.create();
     this.color = color ? color : vec4.fromValues(1, 1, 1, 1);
     this.rotation = rotation ? rotation : 0;
-    this.scale = scale ? scale : vec2.create();
+    this.scale = scale ? scale : vec2.fromValues(1, 1);
     this.anchor = anchor ? anchor : vec2.create();
     this.order = order ? order : 0;
     this.sublayers = [];
     this.superlayer = null;
     this.vertexPosBuffer = gl.createBuffer();
     this.vertexColorBuffer = gl.createBuffer();
-    this.texture = null;
-    if (url) {
-        var element = new Image(), scope = this;
-        element.onload = function () {
-            scope.texture = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, scope.texture);
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.bindTexture(gl.TEXTURE_2D, null);
-        };
-        element.src = url;
-    }
+    this.texture = createTexture(url, type);
     return this;
 };
 Layer.prototype = {
@@ -160,15 +185,15 @@ Layer.prototype = {
             gl.bindTexture(gl.TEXTURE_2D, this.texture);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexPosBuffer);
             var w = this.size[0] / width * 2, h = this.size[1] / width * 2;
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, w, 0, 0, w, h, 0, 0, 0, 0, w, h, 0, 0, h, 0]), gl.STREAM_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, w, 0, 0, w, h, 0, 0, h, 0]), gl.STREAM_DRAW);
             gl.vertexAttribPointer(aVertexPos, 3, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexColorBuffer);
             var r = this.color[0], g = this.color[1], b = this.color[2], a = this.color[3];
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a]), gl.STREAM_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a]), gl.STREAM_DRAW);
             gl.vertexAttribPointer(aVertexColor, 4, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, sharedTexCoordBuffer);
             gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 0, 0);
-            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
             gl.bindTexture(gl.TEXTURE_2D, null);
         }
     },
@@ -198,6 +223,15 @@ Layer.prototype = {
         if (this.texture) gl.deleteTexture(this.texture);
     },
 };
+var Button = function (url, type, origin, size, color, rotation, scale, anchor, order) {
+    
+    return this;
+};
+Button.prototype = Object.create(Layer.prototype);
+Button.prototype.dealloc = function () {
+    Layer.prototype.dealloc.call(this);
+    
+};
 function timmingLinear(t, r) {
     t = Math.max(0, Math.min(1, t));
     if (r) t = 1 - t;
@@ -218,6 +252,7 @@ function timmingEaseInOut(t, r) {
     if (r) t = 1 - t;
     return Math.sin((t - 0.5) * Math.PI) * 0.5 + 0.5;
 }
+var actions = [];
 var Action = function (target, duration, repeat, reverse, autorev, timming) {
     this.target = target;
     this.duration = duration ? Math.max(33, duration) : 1000;
@@ -231,10 +266,17 @@ var Action = function (target, duration, repeat, reverse, autorev, timming) {
 Action.prototype = {
     constructor: Action,
     start: function () {
-        
+        for (var i in actions)
+            if (i == this)
+                return ;
+        actions.push(this);
     },
     stop: function () {
-        
+        for (var i = 0 ; i < actions.length ; ++i)
+            if (actions[i] == this) {
+                actions.splice(i, 1);
+                break;
+            }
     },
     update: function (t) {
         
@@ -243,10 +285,13 @@ Action.prototype = {
         
     },
     finished: function () {
-        
+        return this.elapsed >= this.repeat * this.duration;
     },
     remain: function () {
-        
+        if (this.elapsed <= parseInt(this.repeat) * this.duration)
+            return this.duration - ((this.elapsed - 1) % this.duration + 1);
+        else
+            return this.repeat * this.duration - this.elapsed;
     },
 };
 window.onload = function () {
@@ -285,23 +330,33 @@ window.onload = function () {
     gl.enableVertexAttribArray(aTexCoord);
     uProjectMatrix = gl.getUniformLocation(shaderProgram, 'u_ProjectMatrix');
     uModelViewMatrix = gl.getUniformLocation(shaderProgram, 'u_ModelViewMatrix');
+    uMask2DEnabled = gl.getUniformLocation(shaderProgram, 'u_Mask2DEnabled');
+    uMask2DProgress = gl.getUniformLocation(shaderProgram, 'u_Mask2DProgress');
+    uMask2D = gl.getUniformLocation(shaderProgram, 'u_Mask2D');
     uTexture2D = gl.getUniformLocation(shaderProgram, 'u_Texture2D');
     gl.activeTexture(gl.TEXTURE0);
-    gl.uniform1i(uTexture2D, 0);
+    gl.uniform1i(uMask2D, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.uniform1i(uTexture2D, 1);
     sharedTexCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, sharedTexCoordBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
     width = 1280, height = 720;
     resize();
     document.body.appendChild(canvas);
     perspective(45, width / height, 1, 2);
     loadIdentity();
+    disableMask2D();
+    setMask2DProgress(0);
     window.addEventListener('resize', resize, false);
-    foreLayer = new Layer(null, null, null, vec2.fromValues(width, height));
+    foreLayer = new Layer('../../kanda_yuko.png', null, null, vec2.fromValues(width, height));
+    backLayer = new Layer(null, null, null, vec2.fromValues(width, height));
     window.requestAnimationFrame(animate);
 };
 window.onunload = function () {
     if (!gl) return ;
+    window.cancelAnimationFrame();
     gl.deleteBuffer(sharedTexCoordBuffer);
-    
+    foreLayer.dealloc();
+    backLayer.dealloc();
 };
