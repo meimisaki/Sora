@@ -15,7 +15,7 @@
     }
     window.cancelAnimationFrame = window.cancelAnimationFrame || function (id) { window.clearTimeout(id) };
 }());
-var canvas, gl, width, height, foreLayer, backLayer;
+var canvas, gl, width, height, lastTime, foreLayer, backLayer;
 function resize(event) {
     var canvasWidth = window.innerWidth, canvasHeight = window.innerHeight, aspect = width / height;
     if (canvasWidth < canvasHeight * aspect) canvasHeight = canvasWidth / aspect;
@@ -31,10 +31,24 @@ function render() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     pushMatrix();
     translate(-1, -height / width, -1);
+    scale(2 / width, 2 / width);
     foreLayer.visit();
     popMatrix();
 }
 function animate(currTime) {
+    if (lastTime === undefined) {
+        lastTime = currTime;
+    }
+    else {
+        var dt = Math.max(0, Math.min(33, currTime - lastTime));
+        lastTime = currTime;
+        actions.sort(function (a, b) { return a.remain() - b.remain() ; });
+        for (var i = 0 ; i < actions.length;) {
+            actions[i].step(dt);
+            if (actions[i].finished()) actions.splice(i, 1);
+            else ++i;
+        }
+    }
     render();
     window.requestAnimationFrame(animate);
 }
@@ -179,12 +193,17 @@ Layer.prototype = {
             if (layer.order < this.sublayers[i].order)
                 break;
         this.sublayers.splice(i, 0, layer);
+        layer.superlayer = this;
+    },
+    removeFromSuperlayer: function () {
+        
+        this.superlayer = null;
     },
     draw: function () {
         if (this.texture) {
             gl.bindTexture(gl.TEXTURE_2D, this.texture);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexPosBuffer);
-            var w = this.size[0] / width * 2, h = this.size[1] / width * 2;
+            var w = this.size[0], h = this.size[1];
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, w, 0, 0, w, h, 0, 0, h, 0]), gl.STREAM_DRAW);
             gl.vertexAttribPointer(aVertexPos, 3, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexColorBuffer);
@@ -199,8 +218,8 @@ Layer.prototype = {
     },
     visit: function () {
         pushMatrix();
-        var tx = this.size[0] * this.anchor[0] * 2 / width, ty = this.size[1] * this.anchor[1] * 2 / width;
-        translate(tx + this.origin[0] * 2 / width, ty + this.origin[1] * 2 / width);
+        var tx = this.size[0] * this.anchor[0], ty = this.size[1] * this.anchor[1];
+        translate(tx + this.origin[0], ty + this.origin[1]);
         rotate(0, 0, this.rotation);
         scale(this.scale[0], this.scale[1]);
         translate(-tx, -ty);
@@ -223,14 +242,71 @@ Layer.prototype = {
         if (this.texture) gl.deleteTexture(this.texture);
     },
 };
-var Button = function (url, type, origin, size, color, rotation, scale, anchor, order) {
-    
+var Label = function (text, font, align, type, origin, size, color, rotation, scale, anchor, order) {
+    Layer.call(this, null, type, origin, size, color, rotation, scale, anchor, order);
+    this.texture = gl.createTexture();
+    this.canvas = document.createElement('canvas');
+    this.context = this.canvas.getContext('2d');
+    this.text = text ? text : '';
+    this.font = font ? font : this.context.font;
+    this.align = align ? align : this.context.textAlign;
+    return this;
+};
+Label.prototype = Object.create(Layer.prototype);
+Label.prototype.draw = function () {
+    this.updateTexture();
+    Layer.prototype.draw.call(this);
+};
+Label.prototype.appendText = function (text) {
+    this.text += text;
+};
+Label.prototype.clearText = function () {
+    this.text = '';
+};
+Label.prototype.updateTexture = function () {
+    this.canvas.width = this.size[0], this.canvas.height = this.size[1];
+    this.context.clearRect(0, 0, this.size[0], this.size[1]);
+    this.context.font = this.font;
+    this.context.textAlign = this.align;
+    this.context.textBaseline = 'bottom';
+    this.context.fillStyle = '#FFFFFF';
+    this.context.fillText(this.text, 0, this.size[1]);
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.canvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+};
+var Button = function (normalUrl, disabledUrl, selectedUrl, maskedUrl, callback, type, origin, size, color, rotation, scale, anchor, order) {
+    Layer.call(this, null, type, origin, size, color, rotation, scale, anchor, order);
+    this.normalTexture = createTexture(normalUrl, null);
+    this.disabledTexture = createTexture(disabledUrl, null);
+    this.selectedTexture = createTexture(selectedUrl, null);
+    this.maskedTexture = createTexture(maskedUrl, null);
+    this.callback = callback;
+    this.enabled = true;
+    this.isSelected = false;
+    this.isMasked = false;
     return this;
 };
 Button.prototype = Object.create(Layer.prototype);
+Button.prototype.draw = function () {
+    if (!this.enabled) this.texture = this.disabledTexture;
+    else if (this.isSelected) this.texture = this.selectedTexture;
+    else if (this.isMasked) this.texture = this.maskedTexture;
+    else this.texture = this.normalTexture;
+    Layer.prototype.draw.call(this);
+};
 Button.prototype.dealloc = function () {
+    this.texture = null;
     Layer.prototype.dealloc.call(this);
-    
+    if (this.normalTexture) gl.deleteTexture(this.normalTexture);
+    if (this.disabledTexture) gl.deleteTexture(this.disabledTexture);
+    if (this.selectedTexture) gl.deleteTexture(this.selectedTexture);
+    if (this.maskedTexture) gl.deleteTexture(this.maskedTexture);
 };
 function timmingLinear(t, r) {
     t = Math.max(0, Math.min(1, t));
@@ -253,8 +329,7 @@ function timmingEaseInOut(t, r) {
     return Math.sin((t - 0.5) * Math.PI) * 0.5 + 0.5;
 }
 var actions = [];
-var Action = function (target, duration, repeat, reverse, autorev, timming) {
-    this.target = target;
+var Action = function (duration, repeat, reverse, autorev, timming) {
     this.duration = duration ? Math.max(33, duration) : 1000;
     this.elapsed = 0;
     this.repeat = repeat ? Math.max(0, repeat) : 1;
@@ -282,7 +357,18 @@ Action.prototype = {
         
     },
     step: function (dt) {
-        
+        var t;
+        t = parseInt((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
+        this.elapsed = Math.max(0, this.elapsed + dt);
+        t ^= parseInt((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
+        if (this.autorev && (t & 1)) this.reverse = !this.reverse;
+        if (this.finished())
+            t = this.repeat - parseInt(this.repeat) || 1;
+        else if (this.elapsed == 0)
+            t = 0;
+        else
+            t = (((this.elapsed - 1) % this.duration) + 1) / this.duration;
+        this.update(this.timming(t, this.reverse));
     },
     finished: function () {
         return this.elapsed >= this.repeat * this.duration;
@@ -294,6 +380,52 @@ Action.prototype = {
             return this.repeat * this.duration - this.elapsed;
     },
 };
+ValueAction = function (target, keys, values, duration, repeat, reverse, autorev, timming) {
+    Action.call(this, duration, repeat, reverse, autorev, timming);
+    this.target = target;
+    this.keys = keys;
+    this.fromValues = [];
+    for (var i = 0 ; i < keys.length ; ++i) {
+        var fromValue = target[keys[i]];
+        if (typeof fromValue == 'number')
+            this.fromValues.push(target[keys[i]]);
+        else {
+            this.fromValues.push([]);
+            for (var j = 0 ; j < fromValue.length ; ++j)
+                this.fromValues[i].push(fromValue[j]);
+        }
+    }
+    this.toValues = values;
+    return this;
+};
+ValueAction.prototype = Object.create(Action.prototype);
+ValueAction.prototype.update = function (t) {
+    for (var i = 0 ; i < this.keys.length ; ++i) {
+        var key = this.keys[i];
+        var fromValue = this.fromValues[i];
+        var toValue = this.toValues[i];
+        if (typeof toValue == 'number')
+            this.target[key] = (toValue - fromValue) * t + fromValue;
+        else
+            for (var j = 0 ; j < toValue.length ; ++j)
+                this.target[key][j] = (toValue[j] - fromValue[j]) * t + fromValue[j];
+    }
+};
+CallAction = function (callback, duration, repeat, reverse, autorev, timming) {
+    Action.call(this, duration, repeat, reverse, autorev, timming);
+    this.callback = callback;
+    return this;
+};
+CallAction.prototype = Object.create(Action.prototype);
+CallAction.prototype.update = function (t) {
+    if (this.callback) this.callback(t);
+};
+function createScript(url) {
+    
+}
+function execute() {
+    
+}
 window.onload = function () {
     document.body.style.marginLeft = '0px';
     document.body.style.marginTop = '0px';
