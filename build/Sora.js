@@ -15,7 +15,7 @@
     }
     window.cancelAnimationFrame = window.cancelAnimationFrame || function (id) { window.clearTimeout(id) };
 }());
-var animationFrame, canvas, gl, width, height, lastTime, foreLayer, backLayer;
+var animationFrame, canvas, gl, width, height, lastTime, foreLayer, backLayer, transition;
 function resize(event) {
     var canvasWidth = window.innerWidth, canvasHeight = window.innerHeight, aspect = width / height;
     if (canvasWidth < canvasHeight * aspect) canvasHeight = canvasWidth / aspect;
@@ -40,7 +40,7 @@ function animate(currTime) {
         lastTime = currTime;
     }
     else {
-        var dt = Math.max(0, Math.min(33, currTime - lastTime));
+        var dt = Math.max(1, Math.min(33, currTime - lastTime));
         lastTime = currTime;
         actions.sort(function (a, b) { return a.remain() - b.remain() ; });
         for (var i = 0 ; i < actions.length;) {
@@ -49,43 +49,46 @@ function animate(currTime) {
             else ++i;
         }
     }
-    render(canvas.width, canvas.height, width, height, foreLayer);
+    render(canvas.width, canvas.height, width, height, transition || foreLayer);
     animationFrame = window.requestAnimationFrame(animate);
 }
 var vertexShaderSource = [
     'attribute vec3 a_VertexPos;',
-    'attribute vec4 a_VertexColor;',
     'attribute vec2 a_TexCoord;',
-    'varying vec4 v_VertexColor;',
     'varying vec2 v_TexCoord;',
     'uniform mat4 u_ModelViewMatrix;',
     'void main(void) {',
     '    gl_Position = u_ModelViewMatrix * vec4(a_VertexPos, 1.0);',
-    '    v_VertexColor = a_VertexColor;',
     '    v_TexCoord = a_TexCoord;',
     '}',
 ].join('\n');
 var fragmentShaderSource = [
     'precision mediump float;',
-    'varying vec4 v_VertexColor;',
     'varying vec2 v_TexCoord;',
+    'uniform vec4 u_Color;',
     'uniform bool u_Mask2DEnabled;',
     'uniform float u_Mask2DProgress;',
+    'uniform float u_Mask2DOffset;',
     'uniform sampler2D u_Mask2D;',
     'uniform sampler2D u_Texture2D;',
     'void main(void) {',
-    '    vec4 color = v_VertexColor * texture2D(u_Texture2D, v_TexCoord);',
-    '    if (u_Mask2DEnabled)',
-    '        if (texture2D(u_Mask2D, v_TexCoord).x < u_Mask2DProgress)',
-    '            gl_FragColor = vec4(color.xyz, 0.0);',
+    '    vec4 color = u_Color * texture2D(u_Texture2D, v_TexCoord);',
+    '    if (u_Mask2DEnabled) {',
+    '        float threshold = texture2D(u_Mask2D, v_TexCoord).x;',
+    '        if (u_Mask2DOffset == 0.0)',
+    '            if (threshold <= u_Mask2DProgress)',
+    '                gl_FragColor = vec4(color.xyz, 0.0);',
+    '            else',
+    '                gl_FragColor = vec4(color.xyz, 1.0);',
     '        else',
-    '            gl_FragColor = vec4(color.xyz, 1.0);',
+    '            gl_FragColor = vec4(color.xyz, clamp((threshold - u_Mask2DProgress) / u_Mask2DOffset, 0.0, 1.0));',
+    '    }',
     '    else',
     '        gl_FragColor = color;',
     '}',
 ].join('\n');
 var vertexShader, fragmentShader, shaderProgram;
-var aVertexPos, aVertexColor, aTexCoord, uModelViewMatrix, uMask2DEnabled, uMask2DProgress, uMask2D, uTexture2D;
+var aVertexPos, aTexCoord, uModelViewMatrix, uColor, uMask2DEnabled, uMask2DProgress, uMask2DOffset, uMask2D, uTexture2D;
 var uModelViewMatrices = [mat4.create()];
 function loadIdentity() {
     var m = uModelViewMatrices[uModelViewMatrices.length - 1];
@@ -123,6 +126,10 @@ function scale(x, y, z) {
     mat4.scale(m, m, vec3.fromValues(x, y, z));
     gl.uniformMatrix4fv(uModelViewMatrix, false, m);
 }
+function color(r, g, b, a) {
+    r = r || 0, g = g || 0, b = b || 0, a = a || 0;
+    gl.uniform4f(uColor, r, g, b, a);
+}
 function enableMask2D() {
     gl.uniform1i(uMask2DEnabled, 1);
 }
@@ -131,6 +138,9 @@ function disableMask2D() {
 }
 function setMask2DProgress(f) {
     gl.uniform1f(uMask2DProgress, f);
+}
+function setMask2DOffset(f) {
+    gl.uniform1f(uMask2DOffset, f);
 }
 function bindMask2D(texture) {
     gl.activeTexture(gl.TEXTURE0);
@@ -147,18 +157,28 @@ function createShader(source, type) {
     }
     return shader;
 }
-function createTexture(url, type) {
+function createTexture(url, type, callback) {
     if (!url) return null;
     var texture = gl.createTexture(), element = new Image();
+    texture.dealloc = function () {
+        element.src = null;
+    };
     element.onload = function () {
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, element);
         defaultTexParameteri();
         gl.bindTexture(gl.TEXTURE_2D, null);
+        element.src = null;
+        if (callback) callback();
     };
     element.src = url;
     return texture;
+}
+function deleteTexture(texture) {
+    if (!texture) return ;
+    if (texture.dealloc) texture.dealloc();
+    gl.deleteTexture(texture);
 }
 function defaultTexParameteri() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -166,10 +186,10 @@ function defaultTexParameteri() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 }
-var sharedVertexColorBuffer, sharedTexCoordBuffer;
+var sharedTexCoordBuffer;
 var Layer = function (url, type, origin, size, color, rotation, scale, anchor, order, id) {
     this.origin = origin ? origin : vec2.create();
-    this.size = size ? size : vec2.create();
+    this.size = size ? size : vec2.fromValues(width, height);
     this.color = color ? color : vec4.fromValues(1, 1, 1, 1);
     this.rotation = rotation ? rotation : 0;
     this.scale = scale ? scale : vec2.fromValues(1, 1);
@@ -179,7 +199,6 @@ var Layer = function (url, type, origin, size, color, rotation, scale, anchor, o
     this.sublayers = [];
     this.superlayer = null;
     this.vertexPosBuffer = gl.createBuffer();
-    this.vertexColorBuffer = gl.createBuffer();
     this.texture = createTexture(url, type);
     return this;
 };
@@ -195,6 +214,7 @@ Layer.prototype = {
         layer.superlayer = this;
     },
     removeFromSuperlayer: function () {
+        if (!this.superlayer) return ;
         for (var i = 0 ; i < this.superlayer.sublayers.length ; ++i)
             if (this.superlayer.sublayers[i] == this) {
                 this.superlayer.sublayers.splice(i, 1);
@@ -209,10 +229,7 @@ Layer.prototype = {
             var w = this.size[0], h = this.size[1];
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0, w, 0, 0, w, h, 0, 0, h, 0]), gl.STREAM_DRAW);
             gl.vertexAttribPointer(aVertexPos, 3, gl.FLOAT, false, 0, 0);
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexColorBuffer);
-            var r = this.color[0], g = this.color[1], b = this.color[2], a = this.color[3];
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([r, g, b, a, r, g, b, a, r, g, b, a, r, g, b, a]), gl.STREAM_DRAW);
-            gl.vertexAttribPointer(aVertexColor, 4, gl.FLOAT, false, 0, 0);
+            color(this.color[0], this.color[1], this.color[2], this.color[3]);
             gl.bindBuffer(gl.ARRAY_BUFFER, sharedTexCoordBuffer);
             gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 0, 0);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
@@ -249,8 +266,7 @@ Layer.prototype = {
     dealloc: function () {
         for (var i = 0 ; i < this.sublayers.length ; ++i) this.sublayers[i].dealloc();
         gl.deleteBuffer(this.vertexPosBuffer);
-        gl.deleteBuffer(this.vertexColorBuffer);
-        if (this.texture) gl.deleteTexture(this.texture);
+        deleteTexture(this.texture);
     },
     snapshot: function () {
         var width = parseInt(this.size[0]), height = parseInt(this.size[1]);
@@ -277,6 +293,37 @@ Layer.prototype = {
         gl.deleteRenderbuffer(renderbuffer);
         return texture;
     },
+};
+var Transition = function (url, duration, offset) {
+    Layer.call(this);
+    this.texture = foreLayer.snapshot();
+    if (url == 'fade') {
+        new ValueAction(this, ['color'], [vec4.fromValues(1, 1, 1, 0)], duration).start();
+    }
+    else {
+        this.mask2D = createTexture(url, null, function () {
+            new CallAction(setMask2DProgress, duration).start();
+        });
+        setMask2DOffset(offset ? offset : 0);
+    }
+    return this;
+};
+Transition.prototype = Object.create(Layer.prototype);
+Transition.prototype.visit = function () {
+    backLayer.visit();
+    if (this.mask2D) {
+        enableMask2D();
+        bindMask2D(this.mask2D);
+        Layer.prototype.visit.call(this);
+        disableMask2D();
+    }
+    else {
+        Layer.prototype.visit.call(this);
+    }
+};
+Transition.prototype.dealloc = function () {
+    Layer.prototype.dealloc.call(this);
+    deleteTexture(this.mask2D);
 };
 var Label = function (text, font, align, type, origin, size, color, rotation, scale, anchor, order, id) {
     Layer.call(this, null, type, origin, size, color, rotation, scale, anchor, order, id);
@@ -336,10 +383,10 @@ Button.prototype.draw = function () {
 Button.prototype.dealloc = function () {
     this.texture = null;
     Layer.prototype.dealloc.call(this);
-    if (this.normalTexture) gl.deleteTexture(this.normalTexture);
-    if (this.disabledTexture) gl.deleteTexture(this.disabledTexture);
-    if (this.selectedTexture) gl.deleteTexture(this.selectedTexture);
-    if (this.maskedTexture) gl.deleteTexture(this.maskedTexture);
+    deleteTexture(this.normalTexture);
+    deleteTexture(this.disabledTexture);
+    deleteTexture(this.selectedTexture);
+    deleteTexture(this.maskedTexture);
 };
 function timmingLinear(t, r) {
     t = Math.max(0, Math.min(1, t));
@@ -363,7 +410,7 @@ function timmingEaseInOut(t, r) {
 }
 var actions = [];
 var Action = function (duration, repeat, reverse, autorev, timming) {
-    this.duration = duration ? Math.max(33, duration) : 1000;
+    this.duration = duration ? Math.max(1, duration) : 1000;
     this.elapsed = 0;
     this.repeat = repeat ? Math.max(0, repeat) : 1;
     this.reverse = reverse ? true : false;
@@ -493,22 +540,19 @@ window.onload = function () {
     gl.useProgram(shaderProgram);
     aVertexPos = gl.getAttribLocation(shaderProgram, 'a_VertexPos');
     gl.enableVertexAttribArray(aVertexPos);
-    aVertexColor = gl.getAttribLocation(shaderProgram, 'a_VertexColor');
-    gl.enableVertexAttribArray(aVertexColor);
     aTexCoord = gl.getAttribLocation(shaderProgram, 'a_TexCoord');
     gl.enableVertexAttribArray(aTexCoord);
     uModelViewMatrix = gl.getUniformLocation(shaderProgram, 'u_ModelViewMatrix');
+    uColor = gl.getUniformLocation(shaderProgram, 'u_Color');
     uMask2DEnabled = gl.getUniformLocation(shaderProgram, 'u_Mask2DEnabled');
     uMask2DProgress = gl.getUniformLocation(shaderProgram, 'u_Mask2DProgress');
+    uMask2DOffset = gl.getUniformLocation(shaderProgram, 'u_Mask2DOffset');
     uMask2D = gl.getUniformLocation(shaderProgram, 'u_Mask2D');
     uTexture2D = gl.getUniformLocation(shaderProgram, 'u_Texture2D');
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(uMask2D, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.uniform1i(uTexture2D, 1);
-    sharedVertexColorBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, sharedVertexColorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), gl.STATIC_DRAW);
     sharedTexCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, sharedTexCoordBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
@@ -518,15 +562,15 @@ window.onload = function () {
     loadIdentity();
     disableMask2D();
     setMask2DProgress(0);
+    setMask2DOffset(0);
     window.addEventListener('resize', resize, false);
-    foreLayer = new Layer('../../kanda_yuko.png', null, null, vec2.fromValues(width, height));
-    backLayer = new Layer(null, null, null, vec2.fromValues(width, height));
+    foreLayer = new Layer('../../kanda_yuko.png');
+    backLayer = new Layer('../../menjou_hare.png');
     animationFrame = window.requestAnimationFrame(animate);
 };
 window.onunload = function () {
     if (!gl) return ;
     window.cancelAnimationFrame(animationFrame);
-    gl.deleteBuffer(sharedVertexColorBuffer);
     gl.deleteBuffer(sharedTexCoordBuffer);
     foreLayer.dealloc();
     backLayer.dealloc();
