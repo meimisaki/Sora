@@ -52,7 +52,7 @@ vec2.str = function (a) {
 };
 vec2.fromStr = function (str) {
     var out = new Float32Array(2);
-    var vec2_f_f = /\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)/i;
+    var vec2_f_f = /\s*\(?\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)?\s*$/;
     if (vec2_f_f.test(str)) {
         var f_f = vec2_f_f.exec(str);
         out[0] = parseFloat(f_f[1]), out[1] = parseFloat(f_f[2]);
@@ -122,7 +122,7 @@ vec3.str = function (a) {
 };
 vec3.fromStr = function (str) {
     var out = new Float32Array(3);
-    var vec3_f_f_f = /\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)/i;
+    var vec3_f_f_f = /\s*\(?\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)?\s*$/;
     if (vec3_f_f_f.test(str)) {
         var f_f_f = vec3_f_f_f.exec(str);
         out[0] = parseFloat(f_f_f[1]), out[1] = parseFloat(f_f_f[2]), out[2] = parseFloat(f_f_f[3]);
@@ -205,7 +205,7 @@ vec4.str = function (a) {
 };
 vec4.fromStr = function (str) {
     var out = new Float32Array(4);
-    var vec4_f_f_f_f = /\(\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)/i;
+    var vec4_f_f_f_f = /\s*\(?\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\)?\s*$/;
     if (vec4_f_f_f_f.test(str)) {
         var f_f_f_f = vec4_f_f_f_f.exec(str);
         out[0] = parseFloat(f_f_f_f[1]), out[1] = parseFloat(f_f_f_f[2]), out[2] = parseFloat(f_f_f_f[3]), out[3] = parseFloat(f_f_f_f[4]);
