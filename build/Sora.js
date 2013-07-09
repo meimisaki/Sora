@@ -256,7 +256,7 @@ Layer.prototype = {
         popMatrix();
     },
     getLayerById: function (id) {
-        if (id == this.id) return this;
+        if (id && this.id && id == this.id) return this;
         for (var i = 0 ; i < this.sublayers.length ; ++i) {
             var layer = this.sublayers[i].getLayerById(id);
             if (layer) return layer;
@@ -500,11 +500,125 @@ CallAction.prototype = Object.create(Action.prototype);
 CallAction.prototype.update = function (t) {
     if (this.callback) this.callback(t);
 };
+var script, location, variables = {};
+var methods = {
+    js: function (parameters) {
+        return new Function(parameters.body)();
+    },
+    layer: function (parameters) {
+        var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
+        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        var url = parameters.url || parameters.src;
+        var type = parameters.type;
+        var origin = vec2.fromStr(parameters.origin);
+        var size = vec2.fromStr(parameters.size);
+        var color = vec4.fromStr(parameters.color);
+        var rotation = parseFloat(parameters.rotation);
+        var scale = vec3.fromStr(parameters.scale);
+        var anchor = vec2.fromStr(parameters.anchor);
+        var order = parseInt(parameters.order);
+        var id = parameters.id;
+        var layer = new Layer(url, type, origin, size, color, rotation, scale, anchor, order, id);
+        superlayer.addSublayer(layer);
+        return layer;
+    },
+    label: function (parameters) {
+        var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
+        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        var text = parameters.text || parameters.string;
+        var font = parameters.font;
+        var align = parameters.align;
+        var type = parameters.type;
+        var origin = vec2.fromStr(parameters.origin);
+        var size = vec2.fromStr(parameters.size);
+        var color = vec4.fromStr(parameters.color);
+        var rotation = parseFloat(parameters.rotation);
+        var scale = vec3.fromStr(parameters.scale);
+        var anchor = vec2.fromStr(parameters.anchor);
+        var order = parseInt(parameters.order);
+        var id = parameters.id;
+        var label = new Label(text, font, align, type, origin, size, color, rotation, scale, anchor, order, id);
+        superlayer.addSublayer(label);
+        return label;
+    },
+    button: function (parameters) {
+        var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
+        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        var normalUrl = parameters.normalUrl || parameters.normalSrc;
+        var disabledUrl = parameters.disabledUrl || parameters.disabledSrc;
+        var selectedUrl = parameters.selectedUrl || parameters.selectedSrc;
+        var maskedUrl = parameters.maskedUrl || parameters.maskedSrc;
+        var callback = new Function(parameters.callback);
+        var type = parameters.type;
+        var origin = vec2.fromStr(parameters.origin);
+        var size = vec2.fromStr(parameters.size);
+        var color = vec4.fromStr(parameters.color);
+        var rotation = parseFloat(parameters.rotation);
+        var scale = vec3.fromStr(parameters.scale);
+        var anchor = vec2.fromStr(parameters.anchor);
+        var order = parseInt(parameters.order);
+        var id = parameters.id;
+        var button = new Button(normalUrl, disabledUrl, selectedUrl, maskedUrl, callback, type, origin, size, color, rotation, scale, anchor, order, id);
+        superlayer.addSublayer(button);
+        return button;
+    },
+    remove: function (parameters) {
+        var layer = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id);
+        if (layer) layer.removeFromSuperlayer();
+        return layer;
+    },
+    trans: function (parameters) {
+        
+    },
+    move: function (parameters) {
+        
+    },
+    tint: function (parameters) {
+        
+    },
+    rotate: function (parameters) {
+        
+    },
+};
 function createScript(url) {
     
 }
+function isWhitespace(c) {
+    return c == ' ' || c == '	' || c == '\n' || c == '\r';
+}
+function nextLocation(script, location, callback) {
+    var quote = '';
+    for (var i = location + 1 ; i < script.length ; ++i) {
+        var c = script[i];
+        if (callback(c) && !quote)
+            return i;
+        else if (c == "'" || c == '"')
+            if (c == quote) quote = '';
+            else quote = c;
+    }
+    return script.length;
+}
 function parseParameters(str) {
-    
+    var parameters = {}, location = -1;
+    while (location < str.length) {
+        var keyBegin = nextLocation(str, location, function (c) { return !isWhitespace(c); });
+        if (keyBegin >= str.length) break;
+        var keyEnd = nextLocation(str, keyBegin, function (c) { return c == '=' || isWhitespace(c); });
+        if (keyEnd >= str.length) break;
+        var equalLocation = str[keyEnd] == '=' ? keyEnd : nextLocation(str, keyEnd, function (c) { return c == '='; });
+        if (equalLocation >= str.length) break;
+        var valueBegin = nextLocation(str, equalLocation, function (c) { return !isWhitespace(c); });
+        if (valueBegin >= str.length) break;
+        var valueEnd, quote = str[valueBegin];
+        if (quote == "'" || quote == '"') {
+            valueEnd = nextLocation(str, valueBegin, function (c) { return c == quote; });
+            ++valueBegin;
+        }
+        else valueEnd = nextLocation(str, valueBegin, function (c) { return isWhitespace(c); });
+        parameters[str.slice(keyBegin, keyEnd)] = str.slice(valueBegin, valueEnd);
+        location = valueEnd;
+    }
+    return parameters;
 }
 function execute() {
     
