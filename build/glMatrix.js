@@ -127,6 +127,7 @@ vec3.fromStr = function (str) {
         var out = new Float32Array(3);
         var f_f_f = vec3_f_f_f.exec(str);
         out[0] = parseFloat(f_f_f[1]), out[1] = parseFloat(f_f_f[2]), out[2] = parseFloat(f_f_f[3]);
+        return out;
     }
     return null;
 };

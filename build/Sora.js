@@ -79,9 +79,9 @@ var fragmentShaderSource = [
     '            if (threshold <= u_Mask2DProgress)',
     '                gl_FragColor = vec4(color.xyz, 0.0);',
     '            else',
-    '                gl_FragColor = vec4(color.xyz, 1.0);',
+    '                gl_FragColor = vec4(color.xyz, color.w * 1.0);',
     '        else',
-    '            gl_FragColor = vec4(color.xyz, clamp((threshold - u_Mask2DProgress) / u_Mask2DOffset, 0.0, 1.0));',
+    '            gl_FragColor = vec4(color.xyz, color.w * clamp((threshold - u_Mask2DProgress) / u_Mask2DOffset, 0.0, 1.0));',
     '    }',
     '    else',
     '        gl_FragColor = color;',
@@ -297,6 +297,9 @@ Layer.prototype = {
 var Transition = function (url, duration, offset) {
     Layer.call(this);
     this.texture = foreLayer.snapshot();
+    foreLayer.dealloc();
+    foreLayer = backLayer;
+    backLayer = new Layer();
     if (url == 'fade') {
         new ValueAction(this, ['color'], [vec4.fromValues(1, 1, 1, 0)], duration).start();
     }
@@ -310,7 +313,7 @@ var Transition = function (url, duration, offset) {
 };
 Transition.prototype = Object.create(Layer.prototype);
 Transition.prototype.visit = function () {
-    backLayer.visit();
+    foreLayer.visit();
     if (this.mask2D) {
         enableMask2D();
         bindMask2D(this.mask2D);
@@ -500,7 +503,7 @@ CallAction.prototype = Object.create(Action.prototype);
 CallAction.prototype.update = function (t) {
     if (this.callback) this.callback(t);
 };
-var script, location, variables = {};
+var script, scriptLocation, variables = {};
 var methods = {
     js: function (parameters) {
         return new Function(parameters.body)();
@@ -564,38 +567,66 @@ var methods = {
     },
     remove: function (parameters) {
         var layer = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id);
-        if (layer) layer.removeFromSuperlayer();
+        if (layer) {
+            layer.removeFromSuperlayer();
+            layer.dealloc();
+        }
         return layer;
     },
     trans: function (parameters) {
-        
+        var url = parameters.url || parameters.src;
+        var duration = parseInt(parameters.duration || parameters.time);
+        var offset = parseFloat(parameters.offset);
+        return transition = new Transition(url, duration, offset);
+    },
+    animate: function (parameters) {
+        var target = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id || parameters.target);
+        if (!target) return null;
+        var duration = parseInt(parameters.duration || parameters.time);
+        var repeat = parseFloat(parameters.repeat);
+        var reverse = parseInt(parameters.reverse);
+        var autorev = parseInt(parameters.autorev);
+        var timming = null;
+        if (/\s*easein\s*$/i.test(parameters.timming)) timming = timmingEaseIn;
+        else if (/\s*easeout\s*$/i.test(parameters.timming)) timming = timmingEaseOut;
+        else if (/\s*easeinout\s*$/i.test(parameters.timming)) timming = timmingEaseInOut;
+        var action = new ValueAction(target, parameters.keys, parameters.values, duration, repeat, reverse, autorev, timming);
+        action.start();
+        return action;
     },
     move: function (parameters) {
-        
+        parameters.keys = ['origin'];
+        parameters.values = [vec2.fromStr(parameters.origin || parameters.to)];
+        return methods.animate(parameters);
     },
     tint: function (parameters) {
-        
+        parameters.keys = ['color'];
+        parameters.values = [vec4.fromStr(parameters.color || parameters.to)];
+        return methods.animate(parameters);
     },
     rotate: function (parameters) {
+        parameters.keys = ['rotation'];
+        var radians;
+        if (parameters.degrees) radians = parseFloat(parameters.degrees) * Math.PI / 180;
+        else radians = parseFloat(parameters.radians || parameters.rotation || parameters.to);
+        parameters.values = [radians];
+        return methods.animate(parameters);
+    },
+    wait: function (parameters) {
         
     },
 };
 function createScript(url) {
     
+    scriptLocation = -1;
 }
 function isWhitespace(c) {
     return c == ' ' || c == '	' || c == '\n' || c == '\r';
 }
 function nextLocation(script, location, callback) {
-    var quote = '';
-    for (var i = location + 1 ; i < script.length ; ++i) {
-        var c = script[i];
-        if (callback(c) && !quote)
+    for (var i = location + 1 ; i < script.length ; ++i)
+        if (callback(script[i]))
             return i;
-        else if (c == "'" || c == '"')
-            if (c == quote) quote = '';
-            else quote = c;
-    }
     return script.length;
 }
 function parseParameters(str) {
@@ -621,9 +652,30 @@ function parseParameters(str) {
     return parameters;
 }
 function execute() {
-    
+    if (transition) {
+        transition.dealloc();
+        transition = null;
+    }
+    if (!script) return ;
+    while (scriptLocation < script.length) {
+        var bracketBegin = nextLocation(script, scriptLocation, function (c) { return c == '[' || c == '{'; });
+        if (bracketBegin >= script.length) break;
+        var bracket = script[bracketBegin] == '[' ? ']' : '}', quote = '';
+        var bracketEnd = nextLocation(script, bracketBegin, function (c) {
+            if (c == bracket && !quote) return true;
+            if (c == "'" || c == '"')
+                if (quote) {
+                    if (c == quote) quote = '';
+                }
+                else {
+                    quote = c;
+                }
+            return false;
+        });
+        ++bracketBegin;
+        
+    }
 }
-var layer1, layer2, layer3;
 window.onload = function () {
     document.body.style.marginLeft = '0px';
     document.body.style.marginTop = '0px';
