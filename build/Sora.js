@@ -45,7 +45,10 @@ function animate(currTime) {
         actions.sort(function (a, b) { return a.remain() - b.remain() ; });
         for (var i = 0 ; i < actions.length;) {
             actions[i].step(dt);
-            if (actions[i].finished()) actions.splice(i, 1);
+            if (actions[i].finished()) {
+                if (actions[i].finalize) actions[i].finalize();
+                actions.splice(i, 1);
+            }
             else ++i;
         }
     }
@@ -79,7 +82,7 @@ var fragmentShaderSource = [
     '            if (threshold <= u_Mask2DProgress)',
     '                gl_FragColor = vec4(color.xyz, 0.0);',
     '            else',
-    '                gl_FragColor = vec4(color.xyz, color.w * 1.0);',
+    '                gl_FragColor = vec4(color.xyz, color.w);',
     '        else',
     '            gl_FragColor = vec4(color.xyz, color.w * clamp((threshold - u_Mask2DProgress) / u_Mask2DOffset, 0.0, 1.0));',
     '    }',
@@ -293,6 +296,33 @@ Layer.prototype = {
         gl.deleteRenderbuffer(renderbuffer);
         return texture;
     },
+    mouseDown: function (event) {
+        
+    },
+    mouseUp: function (event) {
+        
+    },
+    mouseEntered: function (event) {
+        
+    },
+    mouseExited: function (event) {
+        
+    },
+    rightMouseDown: function (event) {
+        
+    },
+    rightMouseUp: function (event) {
+        
+    },
+    dispatchEvent: function (event) {
+        
+    },
+};
+var sharedTransitionFinalize = function () {
+    if (transition) {
+        transition.dealloc();
+        transition = null;
+    }
 };
 var Transition = function (url, duration, offset) {
     Layer.call(this);
@@ -301,11 +331,11 @@ var Transition = function (url, duration, offset) {
     foreLayer = backLayer;
     backLayer = new Layer();
     if (url == 'fade') {
-        new ValueAction(this, ['color'], [vec4.fromValues(1, 1, 1, 0)], duration).start();
+        new ValueAction(this, ['color'], [vec4.fromValues(1, 1, 1, 0)], duration, 1, false, false, timmingLinear, sharedTransitionFinalize).start();
     }
     else {
         this.mask2D = createTexture(url, null, function () {
-            new CallAction(setMask2DProgress, duration).start();
+            new CallAction(setMask2DProgress, duration, 1, false, false, sharedTransitionFinalize).start();
         });
         setMask2DOffset(offset ? offset : 0);
     }
@@ -412,13 +442,14 @@ function timmingEaseInOut(t, r) {
     return Math.sin((t - 0.5) * Math.PI) * 0.5 + 0.5;
 }
 var actions = [];
-var Action = function (duration, repeat, reverse, autorev, timming) {
+var Action = function (duration, repeat, reverse, autorev, timming, finalize) {
     this.duration = duration ? Math.max(1, duration) : 1000;
     this.elapsed = 0;
     this.repeat = repeat ? Math.max(0, repeat) : 1;
     this.reverse = reverse ? true : false;
     this.autorev = autorev ? true : false;
     this.timming = timming ? timming : timmingLinear;
+    this.finalize = finalize ? finalize : null;
     return this;
 };
 Action.prototype = {
@@ -432,6 +463,8 @@ Action.prototype = {
     stop: function () {
         for (var i = 0 ; i < actions.length ; ++i)
             if (actions[i] == this) {
+                if (!this.finished()) this.step(parseInt(this.repeat * this.duration) + 1 - this.elapsed);
+                if (this.finalize) this.finalize();
                 actions.splice(i, 1);
                 break;
             }
@@ -463,8 +496,8 @@ Action.prototype = {
             return this.repeat * this.duration - this.elapsed;
     },
 };
-ValueAction = function (target, keys, values, duration, repeat, reverse, autorev, timming) {
-    Action.call(this, duration, repeat, reverse, autorev, timming);
+ValueAction = function (target, keys, values, duration, repeat, reverse, autorev, timming, finalize) {
+    Action.call(this, duration, repeat, reverse, autorev, timming, finalize);
     this.target = target;
     this.keys = keys;
     this.fromValues = [];
@@ -494,8 +527,8 @@ ValueAction.prototype.update = function (t) {
                 this.target[key][j] = (toValue[j] - fromValue[j]) * t + fromValue[j];
     }
 };
-CallAction = function (callback, duration, repeat, reverse, autorev, timming) {
-    Action.call(this, duration, repeat, reverse, autorev, timming);
+CallAction = function (callback, duration, repeat, reverse, autorev, timming, finalize) {
+    Action.call(this, duration, repeat, reverse, autorev, timming, finalize);
     this.callback = callback;
     return this;
 };
@@ -507,6 +540,9 @@ var script, scriptLocation, variables = {}, methodsSources = {};
 var methods = {
     js: function (parameters) {
         return new Function(parameters.body)();
+    },
+    set: function (parameters) {
+        return parseReference(mergeParameters(variables, parameters, true), variables);
     },
     layer: function (parameters) {
         var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
@@ -590,7 +626,7 @@ var methods = {
         if (/\s*easein\s*$/i.test(parameters.timming)) timming = timmingEaseIn;
         else if (/\s*easeout\s*$/i.test(parameters.timming)) timming = timmingEaseOut;
         else if (/\s*easeinout\s*$/i.test(parameters.timming)) timming = timmingEaseInOut;
-        var action = new ValueAction(target, parameters.keys, parameters.values, duration, repeat, reverse, autorev, timming);
+        var action = new ValueAction(target, parameters.keys, parameters.values, duration, repeat, reverse, autorev, timming, finalize);
         action.start();
         return action;
     },
@@ -651,17 +687,20 @@ function parseParameters(str) {
     }
     return parameters;
 }
-function mergeParameters(src, dst) {
+function mergeParameters(src, dst, force) {
     for (key in dst)
-        if (src[key] === undefined)
+        if (force || src[key] === undefined)
             src[key] = dst[key];
     return src;
 }
+function parseReference(src, dst) {
+    for (key in src)
+        if (src[key][0] == '$')
+            if (dst[src[key].slice(1)] !== undefined)
+                src[key] = dst[src[key].slice(1)];
+    return src;
+}
 function execute(str, parameters) {
-    if (transition) {
-        transition.dealloc();
-        transition = null;
-    }
     var location;
     if (str === undefined) {
         str = script;
@@ -669,7 +708,7 @@ function execute(str, parameters) {
     }
     else location = -1;
     if (!str) return ;
-    parameters = parameters || {};
+    parameters = parameters || variables;
     while (location < str.length) {
         var bracketBegin = nextLocation(str, location, function (c) { return c == '[' || c == '{'; });
         if (bracketBegin >= str.length) break;
@@ -692,14 +731,29 @@ function execute(str, parameters) {
         var body = str.slice(methodEnd, bracketEnd);
         if (bracket == ']') {
             if (methods[selector])
-                methods[selector](mergeParameters(parseParameters(body), parameters));
+                methods[selector](parseReference(mergeParameters(parseParameters(body), parameters), parameters));
             else if (methodsSources[selector])
-                execute(methodsSources[selector], mergeParameters(parseParameters(body), parameters));
+                execute(methodsSources[selector], parseReference(mergeParameters(parseParameters(body), parameters), parameters));
         }
         else {
             methodsSources[selector] = body;
         }
     }
+}
+function mouseDown(event) {
+    
+}
+function mouseUp(event) {
+    
+}
+function mouseMove(event) {
+    
+}
+function keyDown(event) {
+    
+}
+function keyUp(event) {
+    
 }
 window.onload = function () {
     document.body.style.marginLeft = '0px';
@@ -755,6 +809,11 @@ window.onload = function () {
     setMask2DProgress(0);
     setMask2DOffset(0);
     window.addEventListener('resize', resize, false);
+    canvas.addEventListener('mousedown', mouseDown, false);
+    canvas.addEventListener('mouseup', mouseUp, false);
+    canvas.addEventListener('mousemove', mouseMove, false);
+    canvas.addEventListener('keydown', keyDown, false);
+    canvas.addEventListener('keyup', keyUp, false);
     foreLayer = new Layer('../../kanda_yuko.png');
     backLayer = new Layer('../../menjou_hare.png');
     animationFrame = window.requestAnimationFrame(animate);
