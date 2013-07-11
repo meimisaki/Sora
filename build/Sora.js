@@ -188,12 +188,12 @@ function defaultTexParameteri() {
 }
 var sharedTexCoordBuffer;
 var Layer = function (url, type, origin, size, color, rotation, scale, anchor, order, id) {
-    this.origin = origin ? origin : vec2.create();
-    this.size = size ? size : vec2.fromValues(width, height);
-    this.color = color ? color : vec4.fromValues(1, 1, 1, 1);
+    this.origin = origin ? vec2.clone(origin) : vec2.create();
+    this.size = size ? vec2.clone(size) : vec2.fromValues(width, height);
+    this.color = color ? vec4.clone(color) : vec4.fromValues(1, 1, 1, 1);
     this.rotation = rotation ? rotation : 0;
-    this.scale = scale ? scale : vec2.fromValues(1, 1);
-    this.anchor = anchor ? anchor : vec2.create();
+    this.scale = scale ? vec2.clone(scale) : vec2.fromValues(1, 1);
+    this.anchor = anchor ? vec2.clone(anchor) : vec2.create();
     this.order = order ? order : 0;
     this.id = id ? id : '';
     this.sublayers = [];
@@ -503,7 +503,7 @@ CallAction.prototype = Object.create(Action.prototype);
 CallAction.prototype.update = function (t) {
     if (this.callback) this.callback(t);
 };
-var script, scriptLocation, variables = {};
+var script, scriptLocation, variables = {}, methodsSources = {};
 var methods = {
     js: function (parameters) {
         return new Function(parameters.body)();
@@ -579,7 +579,7 @@ var methods = {
         var offset = parseFloat(parameters.offset);
         return transition = new Transition(url, duration, offset);
     },
-    animate: function (parameters) {
+    _animate: function (parameters) {
         var target = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id || parameters.target);
         if (!target) return null;
         var duration = parseInt(parameters.duration || parameters.time);
@@ -597,12 +597,12 @@ var methods = {
     move: function (parameters) {
         parameters.keys = ['origin'];
         parameters.values = [vec2.fromStr(parameters.origin || parameters.to)];
-        return methods.animate(parameters);
+        return methods._animate(parameters);
     },
     tint: function (parameters) {
         parameters.keys = ['color'];
         parameters.values = [vec4.fromStr(parameters.color || parameters.to)];
-        return methods.animate(parameters);
+        return methods._animate(parameters);
     },
     rotate: function (parameters) {
         parameters.keys = ['rotation'];
@@ -610,7 +610,7 @@ var methods = {
         if (parameters.degrees) radians = parseFloat(parameters.degrees) * Math.PI / 180;
         else radians = parseFloat(parameters.radians || parameters.rotation || parameters.to);
         parameters.values = [radians];
-        return methods.animate(parameters);
+        return methods._animate(parameters);
     },
     wait: function (parameters) {
         
@@ -623,11 +623,11 @@ function createScript(url) {
 function isWhitespace(c) {
     return c == ' ' || c == '	' || c == '\n' || c == '\r';
 }
-function nextLocation(script, location, callback) {
-    for (var i = location + 1 ; i < script.length ; ++i)
-        if (callback(script[i]))
+function nextLocation(str, location, callback) {
+    for (var i = location + 1 ; i < str.length ; ++i)
+        if (callback(str[i]))
             return i;
-    return script.length;
+    return str.length;
 }
 function parseParameters(str) {
     var parameters = {}, location = -1;
@@ -651,17 +651,30 @@ function parseParameters(str) {
     }
     return parameters;
 }
-function execute() {
+function mergeParameters(src, dst) {
+    for (key in dst)
+        if (src[key] === undefined)
+            src[key] = dst[key];
+    return src;
+}
+function execute(str, parameters) {
     if (transition) {
         transition.dealloc();
         transition = null;
     }
-    if (!script) return ;
-    while (scriptLocation < script.length) {
-        var bracketBegin = nextLocation(script, scriptLocation, function (c) { return c == '[' || c == '{'; });
-        if (bracketBegin >= script.length) break;
-        var bracket = script[bracketBegin] == '[' ? ']' : '}', quote = '';
-        var bracketEnd = nextLocation(script, bracketBegin, function (c) {
+    var location;
+    if (str === undefined) {
+        str = script;
+        location = scriptLocation;
+    }
+    else location = -1;
+    if (!str) return ;
+    parameters = parameters || {};
+    while (location < str.length) {
+        var bracketBegin = nextLocation(str, location, function (c) { return c == '[' || c == '{'; });
+        if (bracketBegin >= str.length) break;
+        var bracket = str[bracketBegin] == '[' ? ']' : '}', quote = '';
+        var bracketEnd = nextLocation(str, bracketBegin, function (c) {
             if (c == bracket && !quote) return true;
             if (c == "'" || c == '"')
                 if (quote) {
@@ -672,8 +685,20 @@ function execute() {
                 }
             return false;
         });
-        ++bracketBegin;
-        
+        location = bracketEnd;
+        var methodBegin = nextLocation(str, bracketBegin, function (c) { return !isWhitespace(c); });
+        var methodEnd = nextLocation(str, methodBegin, function (c) { return c == bracket || isWhitespace(c); });
+        var selector = str.slice(methodBegin, methodEnd);
+        var body = str.slice(methodEnd, bracketEnd);
+        if (bracket == ']') {
+            if (methods[selector])
+                methods[selector](mergeParameters(parseParameters(body), parameters));
+            else if (methodsSources[selector])
+                execute(methodsSources[selector], mergeParameters(parseParameters(body), parameters));
+        }
+        else {
+            methodsSources[selector] = body;
+        }
     }
 }
 window.onload = function () {
