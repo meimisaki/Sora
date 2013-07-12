@@ -318,7 +318,7 @@ Layer.prototype = {
         
     },
 };
-var sharedTransitionFinalize = function () {
+function sharedTransitionFinalize() {
     if (transition) {
         transition.dealloc();
         transition = null;
@@ -420,6 +420,19 @@ Button.prototype.dealloc = function () {
     deleteTexture(this.disabledTexture);
     deleteTexture(this.selectedTexture);
     deleteTexture(this.maskedTexture);
+};
+Button.prototype.mouseDown = function (event) {
+    this.isSelected = true;
+};
+Button.prototype.mouseUp = function (event) {
+    this.isSelected = false;
+    
+};
+Button.prototype.mouseEntered = function (event) {
+    this.isMasked = true;
+};
+Button.prototype.mouseExited = function (event) {
+    this.isMasked = false;
 };
 function timmingLinear(t, r) {
     t = Math.max(0, Math.min(1, t));
@@ -546,7 +559,7 @@ var methods = {
     },
     layer: function (parameters) {
         var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
-        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        superlayer = superlayer.getLayerById(parameters.super) || superlayer;
         var url = parameters.url || parameters.src;
         var type = parameters.type;
         var origin = vec2.fromStr(parameters.origin);
@@ -563,7 +576,7 @@ var methods = {
     },
     label: function (parameters) {
         var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
-        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        superlayer = superlayer.getLayerById(parameters.super) || superlayer;
         var text = parameters.text || parameters.string;
         var font = parameters.font;
         var align = parameters.align;
@@ -582,7 +595,7 @@ var methods = {
     },
     button: function (parameters) {
         var superlayer = parameters.layer == 'back' ? backLayer : foreLayer;
-        superlayer = superlayer.getLayerById(parameters.id) || superlayer;
+        superlayer = superlayer.getLayerById(parameters.super) || superlayer;
         var normalUrl = parameters.normalUrl || parameters.normalSrc;
         var disabledUrl = parameters.disabledUrl || parameters.disabledSrc;
         var selectedUrl = parameters.selectedUrl || parameters.selectedSrc;
@@ -646,6 +659,11 @@ var methods = {
         if (parameters.degrees) radians = parseFloat(parameters.degrees) * Math.PI / 180;
         else radians = parseFloat(parameters.radians || parameters.rotation || parameters.to);
         parameters.values = [radians];
+        return methods._animate(parameters);
+    },
+    scale: function (parameters) {
+        parameters.keys = ['scale'];
+        parameters.values = [vec2.fromStr(parameters.scale || parameters.to)];
         return methods._animate(parameters);
     },
     wait: function (parameters) {
