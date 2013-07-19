@@ -3,41 +3,43 @@ Sora
 
 #Introduction#
 
-****
-
 ##cn##
 
-一个简易美少女游戏引擎 （使用**webgl**）
+一个简易美少女游戏引擎 （使用<b>webgl</b>）
 
 <del>期末考试后开始更新</del>
 
 开始！。。。
 
-之后会增加**音频、视频**的支持
+之后会增加<b>视频</b>的支持
 
 ##en##
 
-A simple galgame engine (using **webgl**)
+A simple galgame engine (using <b>webgl</b>)
 
 <del>I will start to update after my term final exam</del>
 
 Start!...
 
-Support **audio/video** later
+Support <b>video</b> later
 
 ##ja##
 
-たったの簡単なガルゲーエンジン　（**webgl**を使って）
+たったの簡単なガルゲーエンジン　（<b>webgl</b>を使って）
 
 <del>期末試験の後で更新します</del>
 
 スタート！。。。
 
-後で**アウディオ、ビデオ**を支援します
+後で<b>ビデオ</b>を支援します
+
+#TODOS#
+
+>**Database**
+
+>**Encrypt**
 
 #Usage#
-
-****
 
 ##script##
 
@@ -89,6 +91,10 @@ Others are **commands** defined above
 
 **layer, label, button & remove**
 
+`[layer url = anImageSrc origin = aVec2 size = aVec2 id = aString]`
+
+`[remove id = aString layer = back]`
+
 **trans**
 
 `[trans url = anImageSrc duration = anInteger offset = aFloat]`
@@ -96,6 +102,10 @@ Others are **commands** defined above
 **move, tint, rotate & scale**
 
 `[move layer = fore id = bg origin = 'aFloat, aFloat' duration = anInteger]`
+
+**bgm, se, stopbgm, stopse**
+
+`[bgm url = anAudioSrc]`
 
 ##Specify##
 
@@ -134,3 +144,9 @@ Others are **commands** defined above
 **Action, ValueAction, CallAction**
 
 `start` `stop` `update` `step` `finished` `remain`
+
+#Thanks#
+
+###glMatrix.js###
+
+Sora/glMatrix.js forked from glMatrix.js

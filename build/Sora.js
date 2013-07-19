@@ -16,6 +16,7 @@
     window.cancelAnimationFrame = window.cancelAnimationFrame || function (id) { window.clearTimeout(id) };
 }());
 var animationFrame, canvas, gl, width, height, lastTime, foreLayer, backLayer, transition;
+var focusedLayer, draggedType = -1, draggedLayer, mouseLocation = {x: 0, y: 0};
 function resize(event) {
     var canvasWidth = window.innerWidth, canvasHeight = window.innerHeight, aspect = width / height;
     if (canvasWidth < canvasHeight * aspect) canvasHeight = canvasWidth / aspect;
@@ -50,6 +51,15 @@ function animate(currTime) {
                 actions.splice(i, 1);
             }
             else ++i;
+        }
+    }
+    if (!transition && draggedType == -1) {
+        var event = {mouseLocation: mouseLocation};
+        var layer = foreLayer.dispatchEvent(event);
+        if (layer != focusedLayer) {
+            if (focusedLayer) focusedLayer.mouseExited(event);
+            focusedLayer = layer;
+            if (focusedLayer) focusedLayer.mouseEntered(event);
         }
     }
     render(canvas.width, canvas.height, width, height, transition || foreLayer);
@@ -189,6 +199,25 @@ function defaultTexParameteri() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 }
+var backgroundMusic, soundEffects = {};
+function createAudio(url, loop) {
+    if (!url) return null;
+    var audio = document.createElement('audio');
+    audio.dealloc = function () {
+        audio.pause();
+        audio.src = null;
+    };
+    audio.onload = function () {
+        audio.play();
+    };
+    audio.src = url;
+    audio.loop = loop;
+    return audio;
+}
+function deleteAudio(audio) {
+    if (!audio) return ;
+    if (audio.dealloc) audio.dealloc();
+}
 var sharedTexCoordBuffer;
 var Layer = function (url, type, origin, size, color, rotation, scale, anchor, order, id) {
     this.origin = origin ? vec2.clone(origin) : vec2.create();
@@ -315,7 +344,19 @@ Layer.prototype = {
         
     },
     dispatchEvent: function (event) {
+        var i;
+        for (i = this.sublayers.length - 1 ; i >= 0 ; --i) {
+            var layer = this.sublayers[i];
+            if (layer.order < 0) break;
+            layer = layer.dispatchEvent(event);
+            if (layer) return layer;
+        }
         
+        for (; i >= 0 ; --i) {
+            var layer = this.sublayers[i].dispatchEvent(event);
+            if (layer) return layer;
+        }
+        return null;
     },
 };
 function sharedTransitionFinalize() {
@@ -407,10 +448,11 @@ var Button = function (normalUrl, disabledUrl, selectedUrl, maskedUrl, callback,
 };
 Button.prototype = Object.create(Layer.prototype);
 Button.prototype.draw = function () {
+    this.texture = null;
     if (!this.enabled) this.texture = this.disabledTexture;
     else if (this.isSelected) this.texture = this.selectedTexture;
     else if (this.isMasked) this.texture = this.maskedTexture;
-    else this.texture = this.normalTexture;
+    this.texture = this.texture || this.normalTexture;
     Layer.prototype.draw.call(this);
 };
 Button.prototype.dealloc = function () {
@@ -569,7 +611,7 @@ var methods = {
         var scale = vec3.fromStr(parameters.scale);
         var anchor = vec2.fromStr(parameters.anchor);
         var order = parseInt(parameters.order);
-        var id = parameters.id;
+        var id = parameters.id || parameters.name;
         var layer = new Layer(url, type, origin, size, color, rotation, scale, anchor, order, id);
         superlayer.addSublayer(layer);
         return layer;
@@ -588,7 +630,7 @@ var methods = {
         var scale = vec3.fromStr(parameters.scale);
         var anchor = vec2.fromStr(parameters.anchor);
         var order = parseInt(parameters.order);
-        var id = parameters.id;
+        var id = parameters.id || parameters.name;
         var label = new Label(text, font, align, type, origin, size, color, rotation, scale, anchor, order, id);
         superlayer.addSublayer(label);
         return label;
@@ -609,13 +651,13 @@ var methods = {
         var scale = vec3.fromStr(parameters.scale);
         var anchor = vec2.fromStr(parameters.anchor);
         var order = parseInt(parameters.order);
-        var id = parameters.id;
+        var id = parameters.id || parameters.name;
         var button = new Button(normalUrl, disabledUrl, selectedUrl, maskedUrl, callback, type, origin, size, color, rotation, scale, anchor, order, id);
         superlayer.addSublayer(button);
         return button;
     },
     remove: function (parameters) {
-        var layer = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id);
+        var layer = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id || parameters.name);
         if (layer) {
             layer.removeFromSuperlayer();
             layer.dealloc();
@@ -629,13 +671,13 @@ var methods = {
         return transition = new Transition(url, duration, offset);
     },
     _animate: function (parameters) {
-        var target = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id || parameters.target);
+        var target = (parameters.layer == 'back' ? backLayer : foreLayer).getLayerById(parameters.id || parameters.name || parameters.target);
         if (!target) return null;
         var duration = parseInt(parameters.duration || parameters.time);
         var repeat = parseFloat(parameters.repeat);
         var reverse = parseInt(parameters.reverse);
         var autorev = parseInt(parameters.autorev);
-        var timming = null;
+        var timming;
         if (/\s*easein\s*$/i.test(parameters.timming)) timming = timmingEaseIn;
         else if (/\s*easeout\s*$/i.test(parameters.timming)) timming = timmingEaseOut;
         else if (/\s*easeinout\s*$/i.test(parameters.timming)) timming = timmingEaseInOut;
@@ -668,6 +710,24 @@ var methods = {
     },
     wait: function (parameters) {
         
+    },
+    bgm: function (parameters) {
+        deleteAudio(backgroundMusic);
+        return backgroundMusic = createAudio(parameters.url || parameters.src, true);
+    },
+    stopbgm: function (parameters) {
+        deleteAudio(backgroundMusic);
+    },
+    se: function (parameters) {
+        var url = parameters.url || parameters.src;
+        var loop = parseInt(parameters.loop) ? true : false;
+        var id = parameters.id || parameters.name;
+        return se[id] = createAudio(url, loop);
+    },
+    stopse: function (parameters) {
+        var id = parameters.id || parameters.name;
+        deleteAudio(se[id]);
+        return se[id] = undefined;
     },
 };
 function createScript(url) {
@@ -759,18 +819,36 @@ function execute(str, parameters) {
     }
 }
 function mouseDown(event) {
-    
+    mouseMove(event);
+    if (transition || draggedType != -1) return ;
+    draggedType = event.button;
+    event = {mouseLocation: mouseLocation};
+    draggedLayer = foreLayer.dispatchEvent(event);
+    if (draggedLayer) {
+        if (draggedType == 0) draggedLayer.mouseDown(event);
+        else if (draggedType == 2) draggedLayer.rightMouseDown(event);
+    }
 }
 function mouseUp(event) {
-    
+    mouseMove(event);
+    if (transition) return ;
+    event = {mouseLocation: mouseLocation};
+    if (draggedLayer) {
+        if (draggedType == 0) draggedLayer.mouseUp(event);
+        else if (draggedType == 2) draggedLayer.rightMouseUp(event);
+    }
+    draggedLayer = null;
+    draggedType = -1;
 }
 function mouseMove(event) {
-    
+    mouseLocation = {x:event.offsetX, y:canvas.height - event.offsetY};
 }
 function keyDown(event) {
+    if (transition) return ;
     
 }
 function keyUp(event) {
+    if (transition) return ;
     
 }
 window.onload = function () {
@@ -832,8 +910,8 @@ window.onload = function () {
     canvas.addEventListener('mousemove', mouseMove, false);
     canvas.addEventListener('keydown', keyDown, false);
     canvas.addEventListener('keyup', keyUp, false);
-    foreLayer = new Layer('../../kanda_yuko.png');
-    backLayer = new Layer('../../menjou_hare.png');
+    foreLayer = new Layer();
+    backLayer = new Layer();
     animationFrame = window.requestAnimationFrame(animate);
 };
 window.onunload = function () {
