@@ -1,30 +1,43 @@
+/*
+ @fileoverview Sora - A simple galgame engine (using webgl)
+ @author meimisaki
+*/
 var Sora = {};
 (function () {
 	var lastTime = 0;
 	var vendors = ['ms', 'moz', 'webkit', 'o'];
-	for (var x = 0 ; x < vendors.length && !window.requestAnimationFrame ; ++x) {
-		window.requestAnimationFrame = window[vendors[x] + 'RequestAnimationFrame'];
-		window.cancelAnimationFrame = window[vendors[x] + 'CancelAnimationFrame'] || window[vendors[x] + 'CancelRequestAnimationFrame'];
+	for (var x = 0 ; x < vendors.length && !self.requestAnimationFrame ; ++x) {
+		self.requestAnimationFrame = self[vendors[x] + 'RequestAnimationFrame'];
+		self.cancelAnimationFrame = self[vendors[x] + 'CancelAnimationFrame'] || self[vendors[x] + 'CancelRequestAnimationFrame'];
 	}
-	if (window.requestAnimationFrame === undefined) {
-		window.requestAnimationFrame = function (callback) {
+	if (self.requestAnimationFrame === undefined) {
+		self.requestAnimationFrame = function (callback) {
 			var currTime = Date.now(), timeToCall = Math.max(0, 16 - (currTime - lastTime));
-			var id = window.setTimeout(function() { callback(currTime + timeToCall); }, timeToCall);
+			var id = self.setTimeout(function() { callback(currTime + timeToCall); }, timeToCall);
 			lastTime = currTime + timeToCall;
 			return id;
 		};
 	}
-	window.cancelAnimationFrame = window.cancelAnimationFrame || function (id) { window.clearTimeout(id) };
+	self.cancelAnimationFrame = self.cancelAnimationFrame || function (id) { self.clearTimeout(id) };
 }());
 Sora.GL_ARRAY = Float32Array || Array;
 Sora.map = function (input, callback) {
-	if (input instanceof Array && callback) {
+	if (callback) {
 		var output = [];
 		for (var i = 0, l = input.length ; i < l ; ++i)
 			output.push(callback(input[i]));
 		return output;
 	}
-	return null;
+	return input;
+};
+Sora.filter = function (input, callback) {
+	if (callback) {
+		var output = [];
+		for (var i = 0, l = input.length ; i < l ; ++i)
+			if (callback(input[i]))
+				output.push(input[i]);
+	}
+	return input;
 };
 Sora.foreach = function (obj, callback, alternate) {
 	if (typeof obj === 'object' && callback) {
@@ -42,9 +55,8 @@ Sora.foreach = function (obj, callback, alternate) {
 				if (safeHasOwnProperty.call(obj, prop))
 					alternate(prop);
 		}
-		return obj;
 	}
-	return null;
+	return obj;
 };
 Sora.extend = function (obj, src) {
 	Sora.foreach(src, function (prop) {
@@ -75,7 +87,7 @@ Sora.stringify = function (value, key) {
 	else key = ' ' + key + ':';
 	switch (typeof value) {
 	case 'boolean':
-		return key + (value ? '1' : '0');
+		return key + (value ? 't' : 'f');
 	case 'number':
 		return key + value;
 	case 'string':
@@ -84,43 +96,49 @@ Sora.stringify = function (value, key) {
 		return '';
 	}
 };
+Sora.trim = function (str) {
+	return str.replace(/^\s+|\s+$/g, '');
+};
+Sora.parseBool = function (str) {
+	return /t/i.test(str) || /y/i.test(str) || parseInt(str);
+};
 Sora.EventDispatcher = function () {};
 Sora.EventDispatcher.prototype = {
 	constructor: Sora.EventDispatcher,
-	addEventListener: function (type, listner) {
-		if (this.listners === undefined)
-			this.listners = {};
-		if (this.listners[type] === undefined)
-			this.listners[type] = [];
-		if (this.listners[type].indexOf(listner) === -1)
-			this.listners[type].push(listner);
+	addEventListener: function (type, listener) {
+		if (this.listeners === undefined)
+			this.listeners = {};
+		if (this.listeners[type] === undefined)
+			this.listeners[type] = [];
+		if (this.listeners[type].indexOf(listener) === -1)
+			this.listeners[type].push(listener);
 	},
-	hasEventListner: function (type, listner) {
-		if (this.listners === undefined)
+	hasEventlistener: function (type, listener) {
+		if (this.listeners === undefined)
 			return false;
-		if (this.listners[type] === undefined)
+		if (this.listeners[type] === undefined)
 			return false;
-		if (this.listners[type].indexOf(listner) === -1)
+		if (this.listeners[type].indexOf(listener) === -1)
 			return false;
 		return true;
 	},
-	removeEventListner: function (type, listner) {
-		if (this.listners === undefined)
+	removeEventlistener: function (type, listener) {
+		if (this.listeners === undefined)
 			return ;
-		if (this.listners[type] === undefined)
+		if (this.listeners[type] === undefined)
 			return ;
-		var index = this.listners[type].indexOf(listner);
+		var index = this.listeners[type].indexOf(listener);
 		if (index !== -1)
-			this.listners[type].splice(index, 1);
+			this.listeners[type].splice(index, 1);
 	},
 	dispatchEvent: function (event) {
-		if (this.listners === undefined)
+		if (this.listeners === undefined)
 			return ;
-		var listnerArray = this.listners[event.type];
-		if (listnerArray !== undefined) {
+		var listenerArray = this.listeners[event.type];
+		if (listenerArray !== undefined) {
 			event.target = this;
-			for (var i = 0, l = listnerArray.length ; i < l ; ++i)
-				listnerArray[i].call(this, event);
+			for (var i = 0, l = listenerArray.length ; i < l ; ++i)
+				listenerArray[i].call(this, event);
 		}
 	},
 	dealloc: function () {
@@ -167,7 +185,7 @@ Sora.extend(Sora.Texture.prototype, {
 Sora.Sound = function (params) {
 	this.audio = document.createElement('audio');
 	this.audio.volume = params.volume ? parseFloat(params.volume) : 1;
-	this.audio.loop = params.loop ? true : false;
+	this.audio.loop = params.loop ? Sora.parseBool(params.loop) : false;
 	this.audio.autoplay = true;
 	this.audio.src = params.src;
 	this.audio.load();
@@ -192,22 +210,22 @@ Sora.extend(Sora.Sound.prototype, {
 		return '[' + this.name + this.params + ']';
 	}
 });
-Sora.timmingFuncLinear = function (t, r) {
+Sora.timingFuncLinear = function (t, r) {
 	t = Math.max(0, Math.min(1, t));
 	if (r) t = 1 - t;
 	return t;
 };
-Sora.timmingFuncEaseIn = function (t, r) {
+Sora.timingFuncEaseIn = function (t, r) {
 	t = Math.max(0, Math.min(1, t));
 	if (r) t = 1 - t;
 	return Math.sin((t - 1) * Math.PI * 0.5) + 1;
 };
-Sora.timmingFuncEaseOut = function (t, r) {
+Sora.timingFuncEaseOut = function (t, r) {
 	t = Math.max(0, Math.min(1, t));
 	if (r) t = 1 - t;
 	return Math.sin(t * Math.PI * 0.5);
 };
-Sora.timmingFuncEaseInOut = function (t, r) {
+Sora.timingFuncEaseInOut = function (t, r) {
 	t = Math.max(0, Math.min(1, t));
 	if (r) t = 1 - t;
 	return Math.sin((t - 0.5) * Math.PI) * 0.5 + 0.5;
@@ -215,13 +233,14 @@ Sora.timmingFuncEaseInOut = function (t, r) {
 Sora.Action = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
-	this.target = params.target || {id: ''};
+	this.target = params.target;
 	this.duration = params.duration ? Math.max(1, parseInt(params.duration)) : 1000;
 	this.elapsed = params.elapsed ? Math.max(0, parseInt(params.elapsed)) : 0;
 	this.repeat = params.repeat ? Math.max(0, parseFloat(params.repeat)) : 1;
-	this.reverse = params.reverse ? true : false;
-	this.autorev = params.autorev ? true : false;
-	this.timming = params.timming ? params.timming.toLowerCase() : '';
+	this.reverse = params.reverse ? Sora.parseBool(params.reverse) : false;
+	this.autorev = params.autorev ? Sora.parseBool(params.autorev) : false;
+	//needsFinish
+	this.timing = params.timing ? params.timing.toLowerCase() : '';
 	this.callback = params.callback;
 	this.keys = [];
 	this.fromValues = [];
@@ -234,7 +253,7 @@ Sora.Action = function (params) {
 			prop == 'repeat' ||
 			prop == 'reverse' ||
 			prop == 'autorev' ||
-			prop == 'timming' ||
+			prop == 'timing' ||
 			prop == 'callback')
 			return ;
 		if (typeof scope.target[prop] === 'number') {
@@ -257,12 +276,12 @@ Sora.Action = function (params) {
 Sora.Action.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.extend(Sora.Action.prototype, {
 	update: function (t) {
-		var timmingFunc;
-		if (this.timming.match('easeinout')) timmingFunc = Sora.timmingFuncEaseInOut;
-		else if (this.timming.match('easeout')) timmingFunc = Sora.timmingFuncEaseOut;
-		else if (this.timming.match('easein')) timmingFunc = Sora.timmingFuncEaseIn;
-		else timmingFunc = Sora.timmingFuncLinear;
-		t = timmingFunc(t, this.reverse);
+		var timingFunc;
+		if (this.timing.match('easeinout')) timingFunc = Sora.timingFuncEaseInOut;
+		else if (this.timing.match('easeout')) timingFunc = Sora.timingFuncEaseOut;
+		else if (this.timing.match('easein')) timingFunc = Sora.timingFuncEaseIn;
+		else timingFunc = Sora.timingFuncLinear;
+		t = timingFunc(t, this.reverse);
 		for (var i = 0, l = this.keys.length ; i < l ; ++i)
 			this.target[this.keys[i]] = this.toValues[i] * t + (1 - t) * this.fromValues[i];
 	},
@@ -295,7 +314,7 @@ Sora.extend(Sora.Action.prototype, {
 		Sora.stringify(this.repeat, 'repeat') +
 		Sora.stringify(this.reverse, 'reverse') +
 		Sora.stringify(this.autorev, 'autorev') +
-		Sora.stringify(this.timming, 'timming');
+		Sora.stringify(this.timing, 'timing');
 		for (var i = 0, l = this.keys.length ; i < l ; ++i)
 			str += Sora.stringify(Sora.stringify(this.fromValues[i]) + '->' + Sora.stringify(this.toValues[i]), this.keys[i]);
 		return str;
@@ -351,13 +370,14 @@ Sora.extend(Sora.Layer.prototype, {
 	update: function () {
 		
 	},
-	getLayerById: function (id) {
-		if (id && this.id && id == this.id) return this;
-		for (var i = 0, l = this.sublayers.length ; i < l ; ++i) {
-			var layer = this.sublayers[i].getLayerById(id);
-			if (layer) return layer;
-		}
-		return null;
+	getLayersByParams: function (params) {
+		var layers = [];
+		if ((params.id === undefined || this.id && params.id == this.id) &&
+			(params.type === undefined || params.type == this.name))
+			layers.push(this);
+		for (var i = 0, l = this.sublayers.length ; i < l ; ++i)
+			layers = layers.concat(this.sublayers[i].getLayersByParams(params));
+		return layers;
 	},
 	dealloc: function () {
 		if (this.texture) this.texture.dealloc();
@@ -477,9 +497,9 @@ Sora.Button = function (params) {
 	this.disabledTexture = params.disabledSrc ? new Sora.Texture(params.disabledSrc) : null;
 	this.selectedTexture = params.selectedSrc ? new Sora.Texture(params.selectedSrc) : null;
 	this.maskedTexture = params.maskedSrc ? new Sora.Texture(params.maskedSrc) : null;
-	this.disabled = params.disabled ? true : false;
-	this.selected = params.selected ? true : false;
-	this.masked = params.masked ? true : false;
+	this.disabled = params.disabled ? Sora.parseBool(params.disabled) : false;
+	this.selected = params.selected ? Sora.parseBool(params.selected) : false;
+	this.masked = params.masked ? Sora.parseBool(params.masked) : false;
 	this.callback = params.callback;
 };
 Sora.Button.prototype = Object.create(Sora.Layer.prototype);
@@ -614,7 +634,7 @@ Sora.Renderer = function (params) {
 	setOffset(0);
 	function onTextureDealloc(event) {
 		var texture = event.target;
-		texture.removeEventListner('dealloc', onTextureDealloc);
+		texture.removeEventlistener('dealloc', onTextureDealloc);
 		gl.deleteTexture(texture.texture);
 		texture.texture = null;
 	}
@@ -747,26 +767,26 @@ Sora.Controls = function (params) {
 	Sora.EventDispatcher.call(this);
 	var actions = [];
 	this.start = function (action) {
+		if (action === undefined) return ;
 		for (var i = 0, l = actions.length ; i < l ; ++i)
 			if (actions[i] === action)
 				return ;
 		actions.push(action);
 	};
-	this.stop = function (action) {
-		for (var i = 0, l = actions.length ; i < l ; ++i)
-			if (actions[i] === action) {
-				// finish action
-				// action callback
-				actions.splice(i, 1);
-				break;
-			}
+	this.stop = function (params) {
+		actions = Sora.filter(actions, function (action) {
+			var cond = (params.action === undefined || action === params.action) && (params.target === undefined || action.target === params.target);
+			if (cond)
+				action.step(parseInt(action.repeat * action.duration) - action.elapsed + 1);
+			return cond;
+		});
 	};
 	this.update = function (dt) {
 		actions.sort(function (a, b) { return a.remain() - b.remain(); });
-		for (var i = 0, l = actions.length ; i < l ; ++i) {
-			actions[i].step(dt);
-			if (actions[i].done()) actions.splice(i--, 1), --l;
-		}
+		actions = Sora.filter(actions, function (action) {
+			action.step(dt);
+			return action.done();
+		});
 	};
 	this.str = function () {
 		var str = '';
@@ -795,9 +815,46 @@ Sora.Scripter = function (params) {
 	var height = params.height;
 	var script = params.script;
 	var scriptLoc = params.scriptLoc;
-	var vars = {}, cmds = {};
 	var foreLayer = new Sora.Layer({width: width, height: height});
 	var backLayer = new Sora.Layer({width: width, height: height});
+	var vars = {}, cmds = {
+		'eval': function (params) {
+			Sora.foreach(params, function (prop) {
+				//add 'this.' & 'return '
+				vars[prop] = new Function().call(vars);
+			});
+		},
+		'trans': function (params) {
+			
+		},
+		'action': function (params) {
+			controls.start(new Sora.Action(params));
+		},
+		'layer': function (params) {
+			
+		},
+		'label': function (params) {
+			
+		},
+		'button': function (params) {
+			
+		},
+		'remove': function (params) {
+			
+		},
+		'audio': function (params) {
+			
+		},
+		'video': function (params) {
+			console.log('Video not support');
+		},
+		'tag': function (params) {
+			
+		},
+		'goto': function (params) {
+			
+		}
+	};
 	function isWhitespace(c) {
 		return c == ' ' || c == '	' || c == '\n' || c == '\r';
 	}
@@ -843,7 +900,7 @@ Sora.Scripter.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.System = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
-	this.canvas = document.createElement('canvas');
+	this.canvas = params.canvas || document.createElement('canvas');
 	var width = params.width, height = params.height;
 	this.canvas.width = width;
 	this.canvas.height = height;
@@ -853,15 +910,15 @@ Sora.System = function (params) {
 	var scripter = new Sora.Scripter({renderer: renderer, controls: controls, player: player, width: width, height: height});
 	var lastTime = 0, animFrame;
 	function animate(currTime) {
-		animFrame = window.requestAnimationFrame(animate);
+		animFrame = self.requestAnimationFrame(animate);
 		var dt = Math.max(1, Math.min(33, currTime - lastTime));
 		lastTime = currTime;
 		scripter.update(dt);
 	}
-	animFrame = window.requestAnimationFrame(animate);
+	animFrame = self.requestAnimationFrame(animate);
 	this.dealloc = function () {
 		if (animFrame) {
-			window.cancelAnimationFrame(animFrame);
+			self.cancelAnimationFrame(animFrame);
 			animFrame = null;
 		}
 		scripter.dealloc();
