@@ -23,19 +23,29 @@ var Sora = {};
 Sora.GL_ARRAY = Float32Array || Array;
 Sora.map = function (input, callback) {
 	if (callback) {
-		var output = [];
-		for (var i = 0, l = input.length ; i < l ; ++i)
-			output.push(callback(input[i]));
-		return output;
+		if (input.map) {
+			return input.map(callback);
+		}
+		else {
+			var output = [];
+			for (var i = 0, l = input.length ; i < l ; ++i)
+				output.push(callback(input[i]));
+			return output;
+		}
 	}
 	return input;
 };
 Sora.filter = function (input, callback) {
 	if (callback) {
-		var output = [];
-		for (var i = 0, l = input.length ; i < l ; ++i)
-			if (callback(input[i]))
-				output.push(input[i]);
+		if (input.filter) {
+			return input.filter(callback);
+		}
+		else {
+			var output = [];
+			for (var i = 0, l = input.length ; i < l ; ++i)
+				if (callback(input[i]))
+					output.push(input[i]);
+		}
 	}
 	return input;
 };
@@ -113,7 +123,7 @@ Sora.EventDispatcher.prototype = {
 		if (this.listeners[type].indexOf(listener) === -1)
 			this.listeners[type].push(listener);
 	},
-	hasEventlistener: function (type, listener) {
+	hasEventListener: function (type, listener) {
 		if (this.listeners === undefined)
 			return false;
 		if (this.listeners[type] === undefined)
@@ -122,7 +132,7 @@ Sora.EventDispatcher.prototype = {
 			return false;
 		return true;
 	},
-	removeEventlistener: function (type, listener) {
+	removeEventListener: function (type, listener) {
 		if (this.listeners === undefined)
 			return ;
 		if (this.listeners[type] === undefined)
@@ -239,7 +249,7 @@ Sora.Action = function (params) {
 	this.repeat = params.repeat ? Math.max(0, parseFloat(params.repeat)) : 1;
 	this.reverse = params.reverse ? Sora.parseBool(params.reverse) : false;
 	this.autorev = params.autorev ? Sora.parseBool(params.autorev) : false;
-	//needsFinish
+	this.needsFinish = params.needsFinish ? Sora.parseBool(params.needsFinish) : true;
 	this.timing = params.timing ? params.timing.toLowerCase() : '';
 	this.callback = params.callback;
 	this.keys = [];
@@ -247,21 +257,11 @@ Sora.Action = function (params) {
 	this.toValues = [];
 	var scope = this;
 	Sora.foreach(params, function (prop) {
-		if (prop == 'target' ||
-			prop == 'duration' ||
-			prop == 'elapsed' ||
-			prop == 'repeat' ||
-			prop == 'reverse' ||
-			prop == 'autorev' ||
-			prop == 'timing' ||
-			prop == 'callback')
-			return ;
-		if (typeof scope.target[prop] === 'number') {
+		if (scope[prop] === undefined && typeof scope.target[prop] === 'number') {
 			var str = params[prop], fromValue, toValue;
-			if (/[\s\S]+->[\s\S]+/.test(str)) {
-				var values = /([\s\S]+)->([\s\S]+)/.exec(str);
-				fromValue = parseFloat(values[1]);
-				toValue = parseFloat(values[2]);
+			if (/([\s\S]+)->([\s\S]+)/.test(str)) {
+				fromValue = parseFloat(RegExp.$1);
+				toValue = parseFloat(RegExp.$2);
 			}
 			else {
 				fromValue = scope.target[prop];
@@ -286,19 +286,19 @@ Sora.extend(Sora.Action.prototype, {
 			this.target[this.keys[i]] = this.toValues[i] * t + (1 - t) * this.fromValues[i];
 	},
 	step: function (dt) {
-		var t = parseInt((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
+		var t = Math.floor((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
 		this.elapsed = Math.max(0, this.elapsed + dt);
-		t ^= parseInt((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
+		t ^= Math.floor((Math.max(1, Math.min(this.repeat * this.duration, this.elapsed)) - 1) / this.duration);
 		if (this.autorev && (t & 1)) this.reverse = !this.reverse;
 		if (this.done())
-			t = this.repeat - parseInt(this.repeat) || 1;
+			t = this.repeat - Math.floor(this.repeat) || 1;
 		else
 			t = this.elapsed ? (((this.elapsed - 1) % this.duration) + 1) / this.duration : 0;
 		this.update(t);
 		if (this.done() && this.callback) this.callback();
 	},
 	remain: function () {
-		if (this.elapsed <= parseInt(this.repeat) * this.duration)
+		if (this.elapsed <= Math.floor(this.repeat) * this.duration)
 			return this.duration - ((this.elapsed - 1) % this.duration + 1);
 		else
 			return this.repeat * this.duration - this.elapsed;
@@ -314,6 +314,7 @@ Sora.extend(Sora.Action.prototype, {
 		Sora.stringify(this.repeat, 'repeat') +
 		Sora.stringify(this.reverse, 'reverse') +
 		Sora.stringify(this.autorev, 'autorev') +
+		Sora.stringify(this.needsFinish, 'needsFinish') +
 		Sora.stringify(this.timing, 'timing');
 		for (var i = 0, l = this.keys.length ; i < l ; ++i)
 			str += Sora.stringify(Sora.stringify(this.fromValues[i]) + '->' + Sora.stringify(this.toValues[i]), this.keys[i]);
@@ -351,7 +352,7 @@ Sora.extend(Sora.Layer.prototype, {
 	addSublayer: function (layer) {
 		if (layer.superlayer) layer.removeFromSuperlayer();
 		var i = 0;
-		for (var l = this.superlayer.length ; i < l ; ++i)
+		for (var l = this.sublayers.length ; i < l ; ++i)
 			if (layer.order < this.sublayers[i].order)
 				break;
 		this.sublayers.splice(i, 0, layer);
@@ -441,10 +442,9 @@ Sora.extend(Sora.Layer.prototype, {
 		Sora.stringify(this.texture ? this.texture.str() : null, 'src');
 	},
 	str: function () {
-		var str = '[' + this.name + this.params() + ']';
-		for (var i = 0, l = this.sublayers.length ; i < l ; ++i)
-			str += this.sublayers[i].str();
-		return str;
+		return '[' + this.name + this.params() + ']' + Sora.map(this.sublayers, function (layer) {
+			return layer.str();
+		}).join('');
 	}
 });
 Sora.Label = function (params) {
@@ -475,8 +475,38 @@ Sora.extend(Sora.Label.prototype, {
 		this.context.textAlign = this.align;
 		this.context.textBaseline = 'bottom';
 		this.context.fillStyle = '#FFFFFF';
-		this.context.fillText(this.text, 0, this.height);
-		// parse multi-line, and hide the text after start
+		function getTextMetrics(context, text) {
+			var tm = context.measureText(text);
+			if (tm.height === undefined) {
+				if (tm.fontBoundingBoxAscent === undefined) {
+					// DOM trick to get text's height
+					var div = document.createElement('div');
+					div.style.font = context.font;
+					div.innerHTML = text;
+					document.body.appendChild(div);
+					tm.height = parseInt(getComputedStyle(div).height);
+					document.body.removeChild(div);
+				}
+				else tm.height = tm.fontBoundingBoxAscent + tm.fontBoundingBoxDescent;
+			}
+			return tm;
+		}
+		var i = 0, y = this.height;
+		while (i < this.text.length && y > 0) {
+			var str, ch, l = 0;
+			while (i + l < this.text.length) {
+				str = text.substr(i, ++l);
+				ch = str.slice(-1);
+				if (ch == '\r' || ch == '\n' || getTextMetrics(this.context, str).width > this.width) {
+					str = text.substr(i, --l);
+					if (ch == '\r' || ch == '\n') ++l;
+					break;
+				}
+			}
+			y -= getTextMetrics(this.context, str).height;
+			this.context.fillText(str, 0, y, this.width);
+			i += l;
+		}
 		this.texture.needsUpdate = true;
 		Sora.Layer.prototype.update.call(this);
 	},
@@ -550,7 +580,6 @@ Sora.Renderer = function (params) {
 	gl.enable(gl.BLEND);
 	gl.blendEquation(gl.FUNC_ADD);
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-	gl.enable(gl.TEXTURE_2D);
 	function createShader(src, type) {
 		var shader = gl.createShader(type);
 		gl.shaderSource(shader, src);
@@ -634,7 +663,7 @@ Sora.Renderer = function (params) {
 	setOffset(0);
 	function onTextureDealloc(event) {
 		var texture = event.target;
-		texture.removeEventlistener('dealloc', onTextureDealloc);
+		texture.removeEventListener('dealloc', onTextureDealloc);
 		gl.deleteTexture(texture.texture);
 		texture.texture = null;
 	}
@@ -740,7 +769,7 @@ Sora.Renderer = function (params) {
 	var scope = this;
 	this.snapshot = function (layer) {
 		if (!layer) return null;
-		var w = parseInt(layer.width), h = parseInt(layer.height);
+		var w = Math.ceil(layer.width), h = Math.ceil(layer.height);
 		var fb = gl.createFramebuffer();
 		gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
 		//var rb = gl.createRenderbuffer();
@@ -765,6 +794,33 @@ Sora.Renderer.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.Controls = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
+	function onMouseDown(event) {
+		event.preventDefault();
+		
+	}
+	function onMouseUp(event) {
+		event.preventDefault();
+		
+	}
+	function onMouseMove(event) {
+		event.preventDefault();
+		
+	}
+	function onKeyDown(event) {
+		event.preventDefault();
+		
+	}
+	function onKeyUp(event) {
+		event.preventDefault();
+		
+	}
+	var canvas = params.canvas;
+    canvas.addEventListener('mousedown', onMouseDown, false);
+    canvas.addEventListener('mouseup', onMouseUp, false);
+    canvas.addEventListener('mousemove', onMouseMove, false);
+	// issue : use keypress in Opera
+    canvas.addEventListener('keydown', onKeyDown, false);
+    canvas.addEventListener('keyup', onKeyUp, false);
 	var actions = [];
 	this.start = function (action) {
 		if (action === undefined) return ;
@@ -776,8 +832,8 @@ Sora.Controls = function (params) {
 	this.stop = function (params) {
 		actions = Sora.filter(actions, function (action) {
 			var cond = (params.action === undefined || action === params.action) && (params.target === undefined || action.target === params.target);
-			if (cond)
-				action.step(parseInt(action.repeat * action.duration) - action.elapsed + 1);
+			if (cond && action.needsFinish)
+				action.step(Math.floor(action.repeat * action.duration) - action.elapsed + 1);
 			return cond;
 		});
 	};
@@ -788,11 +844,17 @@ Sora.Controls = function (params) {
 			return action.done();
 		});
 	};
+	this.dealloc = function () {
+	    canvas.removeEventListener('mousedown', onMouseDown, false);
+	    canvas.removeEventListener('mouseup', onMouseUp, false);
+	    canvas.removeEventListener('mousemove', onMouseMove, false);
+	    canvas.removeEventListener('keydown', onKeyDown, false);
+	    canvas.removeEventListener('keyup', onKeyUp, false);
+	};
 	this.str = function () {
-		var str = '';
-		for (var i = 0, l = actions.length ; i < l ; ++i)
-			str += actions[i].str();
-		return str;
+		return Sora.map(actions, function (action) {
+			return action.str();
+		}).join('');
 	};
 };
 Sora.Controls.prototype = Object.create(Sora.EventDispatcher.prototype);
@@ -817,11 +879,17 @@ Sora.Scripter = function (params) {
 	var scriptLoc = params.scriptLoc;
 	var foreLayer = new Sora.Layer({width: width, height: height});
 	var backLayer = new Sora.Layer({width: width, height: height});
+	var transLayer;
+	function currLayer() {
+		return transLayer || foreLayer;
+	}
 	var vars = {}, cmds = {
 		'eval': function (params) {
 			Sora.foreach(params, function (prop) {
-				//add 'this.' & 'return '
-				vars[prop] = new Function().call(vars);
+				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[\+\-\*\/\(\)\s]*[\.0-9a-z_]+/ig), function (exp) {
+					var arr = /([\+\-\*\/\(\)\s]*)([\.0-9a-z_]+)/i.exec(exp);
+					return Sora.trim(arr[1]) + (/[\.0-9]/.test(arr[2][0]) ? arr[2] : 'this.' + arr[2]);
+				}).join('') + ';}').call(vars);
 			});
 		},
 		'trans': function (params) {
@@ -901,7 +969,8 @@ Sora.System = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
 	this.canvas = params.canvas || document.createElement('canvas');
-	var width = params.width, height = params.height;
+	var width = params.width || this.canvas.width;
+	var height = params.height || this.canvas.height;
 	this.canvas.width = width;
 	this.canvas.height = height;
 	var renderer = new Sora.Renderer({canvas: this.canvas});
