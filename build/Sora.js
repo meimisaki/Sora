@@ -1,3 +1,4 @@
+// how to represent fore & back
 /*
  @fileoverview Sora - A simple galgame engine (using webgl)
  @author meimisaki
@@ -50,7 +51,7 @@ Sora.filter = function (input, callback) {
 	return input;
 };
 Sora.foreach = function (obj, callback, alternate) {
-	if (typeof obj === 'object' && callback) {
+	if (callback) {
 		alternate = alternate || callback;
 		if (Object.keys) {
 			var keys = Object.keys(obj);
@@ -110,7 +111,20 @@ Sora.trim = function (str) {
 	return str.replace(/^\s+|\s+$/g, '');
 };
 Sora.parseBool = function (str) {
-	return /t/i.test(str) || /y/i.test(str) || parseInt(str);
+	switch (typeof str) {
+	case 'boolean':
+		return str;
+	case 'number':
+		return str === 0;
+	case 'string':
+		return /t/i.test(str) || /y/i.test(str) || (parseInt(str) ? true : false);
+	case 'object':
+		return str !== null;
+	case 'function':
+		return true;
+	default:
+		return false;
+	}
 };
 Sora.EventDispatcher = function () {};
 Sora.EventDispatcher.prototype = {
@@ -192,28 +206,40 @@ Sora.extend(Sora.Texture.prototype, {
 			return null;
 	}
 });
-Sora.Sound = function (params) {
+Sora.Audio = function (params) {
 	this.audio = document.createElement('audio');
-	this.audio.volume = params.volume ? parseFloat(params.volume) : 1;
 	this.audio.loop = params.loop ? Sora.parseBool(params.loop) : false;
+	this.audio.volume = params.volume ? parseFloat(params.volume) : 1;
 	this.audio.autoplay = true;
+	if (params.currentTime) {
+		var scope = this;
+		this.audio.oncanplay = function () {
+			scope.audio.currentTime = parseFloat(params.currentTime);
+		};
+	}
+	this.id = params.id;
+	this.single = params.single ? Sora.parseBool(params.single) : false;
 	this.audio.src = params.src;
-	this.audio.load();
-	// this.audio.currentTime
 };
-Sora.Sound.prototype = Object.create(Sora.EventDispatcher.prototype);
-Sora.extend(Sora.Sound.prototype, {
+Sora.Audio.prototype = Object.create(Sora.EventDispatcher.prototype);
+Sora.extend(Sora.Audio.prototype, {
 	play: function () {
 		this.audio.play();
 	},
 	pause: function () {
 		this.audio.pause();
 	},
-	name: 'sound',
+	stop: function () {
+		this.audio.pause();
+		this.audio.currentTime = 0;
+	},
+	name: 'audio',
 	params: function () {
-		return Sora.stringify(this.audio.volume, 'volume') +
-		Sora.stringify(this.audio.loop, 'loop') +
+		return Sora.stringify(this.audio.loop, 'loop') +
+		Sora.stringify(this.audio.volume, 'volume') +
 		Sora.stringify(this.audio.currentTime, 'currentTime') +
+		Sora.stringify(this.id, 'id') +
+		Sora.stringify(this.single, 'single') +
 		Sora.stringify(this.audio.src, 'src');
 	},
 	str: function () {
@@ -338,7 +364,7 @@ Sora.Layer = function (params) {
 	this.rotation = params.rotation ? parseFloat(params.rotation) : 0;
 	this.opacity = params.opacity ? parseFloat(params.opacity) : 1;
 	this.order = params.order ? parseInt(params.order) : 0;
-	this.id = params.id || '';
+	this.id = params.id;
 	this.sublayers = [];
 	this.superlayer = null;
 	var scope = this;
@@ -362,7 +388,7 @@ Sora.extend(Sora.Layer.prototype, {
 		if (!this.superlayer) return ;
 		var layers = this.superlayer.sublayers;
 		for (var i = 0, l = layers.length ; i < l ; ++i)
-			if (layers[i] == this) {
+			if (layers[i] === this) {
 				layers.splice(i, 1);
 				break;
 			}
@@ -373,8 +399,8 @@ Sora.extend(Sora.Layer.prototype, {
 	},
 	getLayersByParams: function (params) {
 		var layers = [];
-		if ((params.id === undefined || this.id && params.id == this.id) &&
-			(params.type === undefined || params.type == this.name))
+		if ((params.id === undefined || params.id === this.id) &&
+			(params.type === undefined || params.type === this.name))
 			layers.push(this);
 		for (var i = 0, l = this.sublayers.length ; i < l ; ++i)
 			layers = layers.concat(this.sublayers[i].getLayersByParams(params));
@@ -493,13 +519,13 @@ Sora.extend(Sora.Label.prototype, {
 		}
 		var i = 0, y = this.height;
 		while (i < this.text.length && y > 0) {
-			var str, ch, l = 0;
+			var str, c, l = 0;
 			while (i + l < this.text.length) {
 				str = text.substr(i, ++l);
-				ch = str.slice(-1);
-				if (ch == '\r' || ch == '\n' || getTextMetrics(this.context, str).width > this.width) {
+				c = str.slice(-1);
+				if (c === '\r' || c === '\n' || getTextMetrics(this.context, str).width > this.width) {
 					str = text.substr(i, --l);
-					if (ch == '\r' || ch == '\n') ++l;
+					if (c === '\r' || c === '\n') ++l;
 					break;
 				}
 			}
@@ -743,6 +769,15 @@ Sora.Renderer = function (params) {
 		}
 		if (layer.texture) {
 			setAlpha(layer.opacity);
+			/*
+			// for transition
+			if (layer.mask) {
+				setEnabled(true);
+				setProgress(layer.progress);
+				setOffset(layer.offset);
+				bindMask(layer.mask);
+			}
+			*/
 			bindTexture(layer.texture);
 			gl.bindBuffer(gl.ARRAY_BUFFER, verBuf);
 			var w = layer.width, h = layer.height;
@@ -794,47 +829,59 @@ Sora.Renderer.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.Controls = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
+	var disabled = false;
 	function onMouseDown(event) {
 		event.preventDefault();
+		if (disabled) return ;
 		
 	}
 	function onMouseUp(event) {
 		event.preventDefault();
+		if (disabled) return ;
 		
 	}
 	function onMouseMove(event) {
 		event.preventDefault();
+		if (disabled) return ;
 		
 	}
 	function onKeyDown(event) {
 		event.preventDefault();
+		if (disabled) return ;
 		
 	}
 	function onKeyUp(event) {
 		event.preventDefault();
+		if (disabled) return ;
 		
 	}
+	this.enable = function () {
+		disabled = false;
+	};
+	this.disable = function () {
+		disabled = true;
+	};
 	var canvas = params.canvas;
-    canvas.addEventListener('mousedown', onMouseDown, false);
-    canvas.addEventListener('mouseup', onMouseUp, false);
-    canvas.addEventListener('mousemove', onMouseMove, false);
+	canvas.addEventListener('mousedown', onMouseDown, false);
+	canvas.addEventListener('mouseup', onMouseUp, false);
+	canvas.addEventListener('mousemove', onMouseMove, false);
 	// issue : use keypress in Opera
-    canvas.addEventListener('keydown', onKeyDown, false);
-    canvas.addEventListener('keyup', onKeyUp, false);
+	canvas.addEventListener('keydown', onKeyDown, false);
+	canvas.addEventListener('keyup', onKeyUp, false);
 	var actions = [];
 	this.start = function (action) {
 		if (action === undefined) return ;
-		for (var i = 0, l = actions.length ; i < l ; ++i)
-			if (actions[i] === action)
-				return ;
 		actions.push(action);
 	};
 	this.stop = function (params) {
 		actions = Sora.filter(actions, function (action) {
-			var cond = (params.action === undefined || action === params.action) && (params.target === undefined || action.target === params.target);
-			if (cond && action.needsFinish)
-				action.step(Math.floor(action.repeat * action.duration) - action.elapsed + 1);
-			return cond;
+			if ((params.action === undefined || action === params.action) &&
+				(params.target === undefined || action.target === params.target)) {
+				if (action.needsFinish)
+					action.step(Math.floor(action.repeat * action.duration) - action.elapsed + 1);
+				return false;
+			}
+			return true;
 		});
 	};
 	this.update = function (dt) {
@@ -845,11 +892,11 @@ Sora.Controls = function (params) {
 		});
 	};
 	this.dealloc = function () {
-	    canvas.removeEventListener('mousedown', onMouseDown, false);
-	    canvas.removeEventListener('mouseup', onMouseUp, false);
-	    canvas.removeEventListener('mousemove', onMouseMove, false);
-	    canvas.removeEventListener('keydown', onKeyDown, false);
-	    canvas.removeEventListener('keyup', onKeyUp, false);
+		canvas.removeEventListener('mousedown', onMouseDown, false);
+		canvas.removeEventListener('mouseup', onMouseUp, false);
+		canvas.removeEventListener('mousemove', onMouseMove, false);
+		canvas.removeEventListener('keydown', onKeyDown, false);
+		canvas.removeEventListener('keyup', onKeyUp, false);
 	};
 	this.str = function () {
 		return Sora.map(actions, function (action) {
@@ -861,9 +908,26 @@ Sora.Controls.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.Player = function (params) {
 	params = params || {};
 	Sora.EventDispatcher.call(this);
-	
+	var audios = [], scope = this;
+	this.play = function (audio) {
+		if (audio === undefined) return ;
+		if (audio.single) scope.stop(audio);
+		audios.push(audio);
+		audio.play();
+	};
+	this.stop = function (params) {
+		audios = Sora.filter(audios, function (audio) {
+			if (params.id === undefined || params.id === audio.id) {
+				audio.stop();
+				return false;
+			}
+			return true;
+		});
+	};
 	this.str = function () {
-		
+		return Sora.map(audios, function (audio) {
+			return audio.str();
+		}).join('');
 	};
 };
 Sora.Player.prototype = Object.create(Sora.EventDispatcher.prototype);
@@ -875,15 +939,23 @@ Sora.Scripter = function (params) {
 	var player = params.player;
 	var width = params.width;
 	var height = params.height;
-	var script = params.script;
-	var scriptLoc = params.scriptLoc;
 	var foreLayer = new Sora.Layer({width: width, height: height});
 	var backLayer = new Sora.Layer({width: width, height: height});
-	var transLayer;
+	var transLayer, scope = this;
 	function currLayer() {
 		return transLayer || foreLayer;
 	}
-	var vars = {}, cmds = {
+	function onButtonMouseUp(event) {
+		var button = event.target;
+		if (button.callback)
+			scope.execute({str: button.callback});
+	}
+	function onButtonDealloc(event) {
+		var button = event.target;
+		button.removeEventListener('mouseup', onButtonMouseUp);
+		button.removeEventListener('dealloc', onButtonDealloc);
+	}
+	var script = {}, tags, vars = {}, cmds = {
 		'eval': function (params) {
 			Sora.foreach(params, function (prop) {
 				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[\+\-\*\/\(\)\s]*[\.0-9a-z_]+/ig), function (exp) {
@@ -891,40 +963,77 @@ Sora.Scripter = function (params) {
 					return Sora.trim(arr[1]) + (/[\.0-9]/.test(arr[2][0]) ? arr[2] : 'this.' + arr[2]);
 				}).join('') + ';}').call(vars);
 			});
+			return false;
+		},
+		'goto': function (params) {
+			if (params.src) {
+				scope.load(params);
+				return true;
+			}
+			else if (params.id && tags[params.id] !== undefined) {
+				script.loc = tags[params.id];
+				scope.execute(script);
+				return true;
+			}
+			else if (params.loc) {
+				script.loc = parseInt(params.loc);
+				scope.execute(script);
+				return true;
+			}
+			return false;
+		},
+		'if': function (params) {
+			cmds.eval({'': params.cond});
+			if (vars['']) {
+				if (params.then)
+					return scope.execute({str: params.then});
+			}
+			else {
+				if (params.else)
+					return scope.execute({str: params.else});
+			}
+			return false;
 		},
 		'trans': function (params) {
 			
+			return true;
 		},
 		'action': function (params) {
 			controls.start(new Sora.Action(params));
+			return false;
 		},
 		'layer': function (params) {
+			var layer = new Sora.Layer(params);
 			
+			return false;
 		},
 		'label': function (params) {
+			var label = new Sora.Label(params);
 			
+			return false;
 		},
 		'button': function (params) {
+			var button = new Sora.Button(params);
+			button.addEventListener('dealloc', onButtonDealloc);
+			button.addEventListener('mouseup', onButtonMouseUp);
 			
+			return false;
 		},
 		'remove': function (params) {
 			
+			return false;
 		},
 		'audio': function (params) {
 			
+			return false;
 		},
 		'video': function (params) {
 			console.log('Video not support');
-		},
-		'tag': function (params) {
-			
-		},
-		'goto': function (params) {
-			
+			return false;
 		}
 	};
 	function isWhitespace(c) {
-		return c == ' ' || c == '	' || c == '\n' || c == '\r';
+		return c === ' ' || c === '	' || c === '\n' || c === '\r';
 	}
 	function parseParams(str) {
 		var params = {}, loc = -1;
@@ -940,28 +1049,70 @@ Sora.Scripter = function (params) {
 	}
 	function parseRef(dst, src) {
 		Sora.foreach(dst, function (prop) {
-			if (dst[prop][0] == '$' && src[dst[prop].slice(1)] !== undefined)
+			if (dst[prop][0] === '$' && src[dst[prop].slice(1)] !== undefined)
 				dst[prop] = src[dst[prop].slice(1)];
 		});
 		return dst;
 	}
-	var scope = this;
-	function onButtonMouseDown(event) {
-		var button = event.target;
-		
+	function nextLoc(script, cmp) {
+		var test;
+		switch (typeof cmp) {
+		case 'string':
+			test = function (c) { return cmp === c; };
+			break;
+		case 'function':
+			test = cmp;
+			break;
+		default:
+			if (cmp instanceof RegExp)
+				test = function (c) { return cmp.test(c); };
+			break;
+		}
+		if (test) {
+			for (var i = script.loc, l = script.str.length ; i < l ; ++i) {
+				var c = script.str.charAt(i);
+				if (c === '\\')
+					++i;
+				else if (test(c))
+					return i;
+			}
+		}
+		return -1;
 	}
-	this.execute = function (str, params) {
+	this.execute = function (script, params) {
+		if (script.loc === undefined) script.loc = -1;
+		params = params || vars;
 		
+		return false;
 	};
 	this.update = function (dt) {
 		controls.update(dt);
 		renderer.render(foreLayer);
 	};
 	this.save = function (params) {
+		var str;
+		
+		str += '[goto ' +
+		Sora.stringify(script.src, 'src') +
+		Sora.stringify(script.loc, 'loc') +
+		']';
 		
 	};
 	this.load = function (params) {
-		
+		if (params.src === undefined) return ;
+		controls.disable();
+		var xmlhttp = new XMLHttpRequest();
+		xmlhttp.onreadystatechange = function () {
+			if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+				controls.enable();
+				script.src = params.src;
+				script.str = xmlhttp.responseText;
+				// parse tags
+				cmds.goto({id: params.id, loc: params.loc});
+			}
+		};
+		xmlhttp.open('GET', params.src, true);
+		xmlhttp.send();
 	};
 };
 Sora.Scripter.prototype = Object.create(Sora.EventDispatcher.prototype);
@@ -977,6 +1128,7 @@ Sora.System = function (params) {
 	var controls = new Sora.Controls({canvas: this.canvas});
 	var player = new Sora.Player();
 	var scripter = new Sora.Scripter({renderer: renderer, controls: controls, player: player, width: width, height: height});
+	scripter.load({src: params.src, id: params.id});
 	var lastTime = 0, animFrame;
 	function animate(currTime) {
 		animFrame = self.requestAnimationFrame(animate);

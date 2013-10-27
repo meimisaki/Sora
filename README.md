@@ -39,6 +39,14 @@ A simple galgame engine (using <b>webgl</b>)
 
 ###script###
 
+####parentheses ()####
+
+A pair of parentheses represent a **tag**
+
+The only string inside parentheses indicates the tag's **id**
+
+	(id)
+
 ####brackets []####
 
 A pair of brackets represent a **command**
@@ -75,13 +83,30 @@ Recursion is possible, but not recommended
 		...									// order of expressions' evaluation is NOT guaranteed, please use multiple 'eval' to insure the topological order of them
 		varIdN	=	'']						// empty expression will delete the variable
 
+**goto**
+
+	[goto
+	@optional
+		id	=	tagId		// after 'goto', it won't return to current script
+		loc	=	int			// default: -1, ignore if id exist
+		src	=	scriptSrc]	// default: current script, if exist, load script using ajax
+
+**if**
+
+	[if
+	@required
+		cond	=	expression	// similar to 'eval'
+	@optional
+		then	=	script		// default: null
+		else	=	script]		// default: null
+
 **trans**
 
 	[trans
 	@optinal
 		src			=	imageSrc	// default: fade effect
-		duration	=	int			// default: 1000 ms
-		offset		=	float]		// default: 0
+		duration	=	int			// default: 1000 ms		range: [1, +inf)
+		offset		=	float]		// default: 0			range: [0, 1]
 
 **action**
 
@@ -89,13 +114,13 @@ Recursion is possible, but not recommended
 	@required
 		target		=	layerId
 	@optional
-		duration	=	int				// default: 1000 ms
-		elapsed		=	int				// default: 0 ms
-		repeat		=	float			// default: 1
+		duration	=	int				// default: 1000 ms		range: [1, +inf)
+		elapsed		=	int				// default: 0 ms		range: [0, duration * repeat]
+		repeat		=	float			// default: 1			range: (0, +inf)
 		reverse		=	bool			// default: false
 		autorev		=	bool			// default: false
 		needsFinish	=	bool			// default: true
-		timing		=	timingFunc		// default: linear
+		timing		=	timingFunc		// default: linear		options: ['linear', 'easein', 'easeout', 'easeinout']
 		property1	=	float			// set property1 of target to the float in the duration
 		...
 		propertyN	=	float->float]	// set propertyN of target from first float to second float in the duration
@@ -106,24 +131,24 @@ Recursion is possible, but not recommended
 	@optional
 		x			=	float		// default: 0
 		y			=	float		// default: 0
-		width		=	float		// default: texture.width	||	0
-		height		=	float		// default: texture.height	||	0
+		width		=	float		// default: image.width		||	0
+		height		=	float		// default: image.height	||	0
 		src			=	imageSrc	// default: null
-		anchorX		=	float		// default: 0
-		anchorY		=	float		// default: 0
-		scaleX		=	float		// default: 1
-		scaleY		=	float		// default: 1
-		rotation	=	float		// default: 0
-		opacity		=	float		// default: 1
-		order		=	int			// default: 0
+		anchorX		=	float		// default: 0	range: [0, 1]
+		anchorY		=	float		// default: 0	range: [0, 1]
+		scaleX		=	float		// default: 1	range: (-inf, 0) U (0, +inf)
+		scaleY		=	float		// default: 1	range: (-inf, 0) U (0, +inf)
+		rotation	=	float		// default: 0	range: (-inf, +inf)
+		opacity		=	float		// default: 1	range: [0, 1]
+		order		=	int			// default: 0	range: (-inf, +inf)
 		id			=	layerId		// default: ''
 		super		=	layerId]	// default: current fore layer
 	[label	// derived from layer
 	@optional
 		text	=	someText		// default: ''
 		font	=	fontNameAndSize	// default: browser's default font
-		align	=	textAlignment	// default: left
-		start	=	float]			// default: 1
+		align	=	textAlignment	// default: left	options: ['left', 'right', 'center']
+		start	=	float]			// default: 1		range: [0, 1]
 	[button // derived from layer
 	@optional
 		normalSrc	=	imageSrc	// default: null
@@ -131,13 +156,23 @@ Recursion is possible, but not recommended
 		selectedSrc	=	imageSrc	// default: null
 		maskedSrc	=	imageSrc	// default: null
 		disabled	=	bool 		// default: false
-		callback	=	methodName]	// default: null
+		callback	=	script]		// default: null
 	[remove
 	@optional
 		id		=	layerId		// default: null
 		type	=	layerType]	// default: null
 
 **audio**
+
+	[audio
+	@required
+		src			=	audioSrc
+	@optional
+		loop		=	bool		// default: false
+		volume		=	float		// default: 1		range: [0, 1]
+		currentTime	=	float		// default: 0 s		range: [0, audio.duration]
+		id			=	audioId		// default: ''
+		single		=	bool]		// default: false
 
 ##Thanks##
 
