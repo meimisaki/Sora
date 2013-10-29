@@ -29,13 +29,14 @@ A simple galgame engine (using <b>webgl</b>)
 	};
 	</script>
 
->Sora-Script below shows how to add layer with fade effect and move from (0, 0) to (x, y)
+>Sora-Script below shows how to add a layer and use a defined-method 'fadein' to animate it
 
-	[remove type='layer']
+	{fadein
+		[action duration=500 opacity='0->1' timing='linear']
+		[action duration=1000 y='-32->0' timing='easeout']}
 	[layer src='bg.png' id='bg' width=1024 height=640]
 	[layer src='sora.png' id='sora' super='bg']
-	[action target='sora' duration=500 opacity='0->1' timing='linear']
-	[action target='sora' duration=1000 x=512 y=320 timing='easein']
+	[fadein target='sora']
 
 ###script###
 
@@ -55,7 +56,7 @@ The first string indicates the name of **method**, others are **arguments**
 
 Each argument forms as **'key = value'**, key & value is separated by a equal sign
 
-Key & value are **ALWAYS** treated as **strings**, and value might be wrapped in quotes('' & ""), but key doesn't
+Key & value are **ALWAYS** treated as **strings**, so they could be wrapped in quotes('' & "")
 
 	[method key1=value1 key2=value2 ...]
 
@@ -99,6 +100,11 @@ Recursion is possible, but not recommended
 	@optional
 		then	=	script		// default: null
 		else	=	script]		// default: null
+
+**wait & next**
+
+	[wait]	// break current execution
+	[next]	// continue to execute current script
 
 **trans**
 

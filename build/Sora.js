@@ -1,8 +1,10 @@
 // how to represent fore & back
+// add audio for button enter & exit
 /*
  @fileoverview Sora - A simple galgame engine (using webgl)
  @author meimisaki
 */
+'use strict';
 var Sora = {};
 (function () {
 	var lastTime = 0;
@@ -112,18 +114,10 @@ Sora.trim = function (str) {
 };
 Sora.parseBool = function (str) {
 	switch (typeof str) {
-	case 'boolean':
-		return str;
-	case 'number':
-		return str === 0;
 	case 'string':
 		return /t/i.test(str) || /y/i.test(str) || (parseInt(str) ? true : false);
-	case 'object':
-		return str !== null;
-	case 'function':
-		return true;
 	default:
-		return false;
+		return str ? true : false;
 	}
 };
 Sora.EventDispatcher = function () {};
@@ -343,7 +337,7 @@ Sora.extend(Sora.Action.prototype, {
 		Sora.stringify(this.needsFinish, 'needsFinish') +
 		Sora.stringify(this.timing, 'timing');
 		for (var i = 0, l = this.keys.length ; i < l ; ++i)
-			str += Sora.stringify(Sora.stringify(this.fromValues[i]) + '->' + Sora.stringify(this.toValues[i]), this.keys[i]);
+			str += Sora.stringify(this.fromValues[i] + '->' + this.toValues[i], this.keys[i]);
 		return str;
 	},
 	str: function () {
@@ -394,6 +388,15 @@ Sora.extend(Sora.Layer.prototype, {
 			}
 		this.superlayer = null;
 	},
+	transformMat: function () {
+		var mat = mat4.create();
+		var tx = this.width * this.anchorX, ty = this.height * this.anchorY;
+		mat4.translate(mat, mat, vec3.fromValues(tx + this.x, ty + this.y, 0));
+		mat4.rotateZ(mat, mat, this.rotation);
+		mat4.scale(mat, mat, vec3.fromValues(this.scaleX, this.scaleY, 1));
+		mat4.translate(mat, mat, vec3.fromValues(-tx, -ty, 0));
+		return mat;
+	},
 	update: function () {
 		
 	},
@@ -412,36 +415,16 @@ Sora.extend(Sora.Layer.prototype, {
 			this.sublayers[i].dealloc();
 		Sora.EventDispatcher.prototype.dealloc.call(this);
 	},
-	mouseEntered: function (event) {
-		
-	},
-	mouseExited: function (event) {
-		
-	},
-	mouseDown: function (event) {
-		
-	},
-	mouseUp: function (event) {
-		
-	},
-	mouseDragged: function (event) {
-		
-	},
-	rightMouseDown: function (event) {
-		
-	},
-	rightMouseUp: function (event) {
-		
-	},
-	rightMouseDraged: function (event) {
-		
-	},
-	keyDown: function (event) {
-		
-	},
-	keyUp: function (event) {
-		
-	},
+	mouseEntered: function (event) {},
+	mouseExited: function (event) {},
+	mouseDown: function (event) {},
+	mouseUp: function (event) {},
+	mouseDragged: function (event) {},
+	rightMouseDown: function (event) {},
+	rightMouseUp: function (event) {},
+	rightMouseDragged: function (event) {},
+	keyDown: function (event) {},
+	keyUp: function (event) {},
 	responseToMouseEvent: function (event) {
 		
 		return null;
@@ -521,10 +504,10 @@ Sora.extend(Sora.Label.prototype, {
 		while (i < this.text.length && y > 0) {
 			var str, c, l = 0;
 			while (i + l < this.text.length) {
-				str = text.substr(i, ++l);
+				str = text.slice(i, ++l + i);
 				c = str.slice(-1);
 				if (c === '\r' || c === '\n' || getTextMetrics(this.context, str).width > this.width) {
-					str = text.substr(i, --l);
+					str = text.slice(i, --l + i);
 					if (c === '\r' || c === '\n') ++l;
 					break;
 				}
@@ -574,6 +557,23 @@ Sora.extend(Sora.Button.prototype, {
 		if (this.selectedTexture) this.selectedTexture.dealloc();
 		if (this.maskedTexture) this.maskedTexture.dealloc();
 		Sora.Layer.prototype.dealloc.call(this);
+	},
+	mouseEntered: function (event) {
+		this.masked = true;
+	},
+	mouseExited: function (event) {
+		this.masked = false;
+	},
+	mouseDown: function (event) {
+		this.selected = true;
+		this.dispatchEvent({type: 'mousedown'});
+	},
+	mouseUp: function (event) {
+		this.selected = false;
+		this.dispatchEvent({type: 'mouseup'});
+	},
+	keyDown: function (event) {
+		this.mouseUp(event);
 	},
 	name: 'button',
 	params: function () {
@@ -731,35 +731,36 @@ Sora.Renderer = function (params) {
 		}
 	}
 	function loadIdentity() {
-		var m = matrices[matrices.length - 1];
-		mat4.identity(m);
-		gl.uniformMatrix4fv(prog.mvMat, false, m);
+		var curr = matrices[matrices.length - 1];
+		mat4.identity(curr);
+		gl.uniformMatrix4fv(prog.mvMat, false, curr);
 	}
 	function translate(x, y, z) {
-		var m = matrices[matrices.length - 1];
-		mat4.translate(m, m, vec3.fromValues(x || 0, y || 0, z || 0));
-		gl.uniformMatrix4fv(prog.mvMat, false, m);
+		var curr = matrices[matrices.length - 1];
+		mat4.translate(curr, curr, vec3.fromValues(x || 0, y || 0, z || 0));
+		gl.uniformMatrix4fv(prog.mvMat, false, curr);
 	}
 	function rotate(x, y, z) {
-		var m = matrices[matrices.length - 1];
-		if (x) mat4.rotateX(m, m, x);
-		if (y) mat4.rotateY(m, m, y);
-		if (z) mat4.rotateZ(m, m, z);
-		gl.uniformMatrix4fv(prog.mvMat, false, m);
+		var curr = matrices[matrices.length - 1];
+		if (x) mat4.rotateX(curr, curr, x);
+		if (y) mat4.rotateY(curr, curr, y);
+		if (z) mat4.rotateZ(curr, curr, z);
+		gl.uniformMatrix4fv(prog.mvMat, false, curr);
 	}
 	function scale(x, y, z) {
-		var m = matrices[matrices.length - 1];
-		mat4.scale(m, m, vec3.fromValues(x || 1, y || 1, z || 1));
-		gl.uniformMatrix4fv(prog.mvMat, false, m);
+		var curr = matrices[matrices.length - 1];
+		mat4.scale(curr, curr, vec3.fromValues(x || 1, y || 1, z || 1));
+		gl.uniformMatrix4fv(prog.mvMat, false, curr);
+	}
+	function multMatrix(mat) {
+		var curr = matrices[matrices.length - 1];
+		mat4.mul(curr, curr, mat);
+		gl.uniformMatrix4fv(prog.mvMat, false, curr);
 	}
 	loadIdentity();
 	function draw(layer) {
 		pushMatrix();
-		var tx = layer.width * layer.anchorX, ty = layer.height * layer.anchorY;
-		translate(tx + layer.x, ty + layer.y);
-		rotate(0, 0, layer.rotation);
-		scale(layer.scaleX, layer.scaleY);
-		translate(-tx, -ty);
+		multMatrix(layer.transformMat());
 		var opacity = layer.opacity;
 		if (layer.superlayer) layer.opacity = layer.opacity * layer.superlayer.opacity;
 		var i = 0, l = layer.sublayers.length;
@@ -865,7 +866,7 @@ Sora.Controls = function (params) {
 	canvas.addEventListener('mousedown', onMouseDown, false);
 	canvas.addEventListener('mouseup', onMouseUp, false);
 	canvas.addEventListener('mousemove', onMouseMove, false);
-	// issue : use keypress in Opera
+	// issue: use keypress in Opera
 	canvas.addEventListener('keydown', onKeyDown, false);
 	canvas.addEventListener('keyup', onKeyUp, false);
 	var actions = [];
@@ -885,10 +886,11 @@ Sora.Controls = function (params) {
 		});
 	};
 	this.update = function (dt) {
+		if (disabled) return ;
 		actions.sort(function (a, b) { return a.remain() - b.remain(); });
 		actions = Sora.filter(actions, function (action) {
 			action.step(dt);
-			return action.done();
+			return !action.done();
 		});
 	};
 	this.dealloc = function () {
@@ -955,7 +957,7 @@ Sora.Scripter = function (params) {
 		button.removeEventListener('mouseup', onButtonMouseUp);
 		button.removeEventListener('dealloc', onButtonDealloc);
 	}
-	var script = {}, tags, vars = {}, cmds = {
+	var currScript, tags, vars = {}, cmds = {
 		'eval': function (params) {
 			Sora.foreach(params, function (prop) {
 				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[\+\-\*\/\(\)\s]*[\.0-9a-z_]+/ig), function (exp) {
@@ -966,21 +968,16 @@ Sora.Scripter = function (params) {
 			return false;
 		},
 		'goto': function (params) {
-			if (params.src) {
+			if (params.src)
 				scope.load(params);
-				return true;
+			else {
+				if (params.id && tags[params.id] !== undefined)
+					currScript.loc = tags[params.id];
+				else if (params.loc)
+					currScript.loc = parseInt(params.loc);
+				scope.execute(currScript);
 			}
-			else if (params.id && tags[params.id] !== undefined) {
-				script.loc = tags[params.id];
-				scope.execute(script);
-				return true;
-			}
-			else if (params.loc) {
-				script.loc = parseInt(params.loc);
-				scope.execute(script);
-				return true;
-			}
-			return false;
+			return true;
 		},
 		'if': function (params) {
 			cmds.eval({'': params.cond});
@@ -989,21 +986,33 @@ Sora.Scripter = function (params) {
 					return scope.execute({str: params.then});
 			}
 			else {
-				if (params.else)
-					return scope.execute({str: params.else});
+				if (params['else'])
+					return scope.execute({str: params['else']});
 			}
 			return false;
+		},
+		'wait': function (params) {
+			return true;
+		},
+		'next': function (params) {
+			scope.execute(currScript);
+			return true;
 		},
 		'trans': function (params) {
 			
 			return true;
 		},
 		'action': function (params) {
+			// params.target = foreLayer.getLayersByParams({id: params.target})[0];
+			
 			controls.start(new Sora.Action(params));
 			return false;
 		},
 		'layer': function (params) {
 			var layer = new Sora.Layer(params);
+			
+			// var layers = foreLayer.getLayersByParams({id: params.super});
+			// (layers.length ? layers[0] : foreLayer).addSublayer(layer);
 			
 			return false;
 		},
@@ -1020,7 +1029,13 @@ Sora.Scripter = function (params) {
 			return false;
 		},
 		'remove': function (params) {
-			
+			/*
+			var layers = foreLayer.getLayersByParams({type: params.type, id: params.id});
+			for (var i = layers.length - 1 ; i >= 0 ; --i) {
+				layers[i].removeFromSuperlayer();
+				layers[i].dealloc();
+			}
+			*/
 			return false;
 		},
 		'audio': function (params) {
@@ -1033,32 +1048,25 @@ Sora.Scripter = function (params) {
 		}
 	};
 	function isWhitespace(c) {
-		return c === ' ' || c === '	' || c === '\n' || c === '\r';
-	}
-	function parseParams(str) {
-		var params = {}, loc = -1;
-		
-		return params;
-	}
-	function mergeParams(dst, src, force) {
-		Sora.foreach(src, function (prop) {
-			if (force || dst[prop] === undefined)
-				dst[prop] = src[prop];
-		});
-		return dst;
+		return ' 	\n\r'.indexOf(c) !== -1;
 	}
 	function parseRef(dst, src) {
 		Sora.foreach(dst, function (prop) {
-			if (dst[prop][0] === '$' && src[dst[prop].slice(1)] !== undefined)
-				dst[prop] = src[dst[prop].slice(1)];
+			if (dst[prop][0] === '$') {
+				var str = dst[prop].slice(1);
+				if (src[str] !== undefined)
+					dst[prop] = src[str];
+				else if (vars[str] !== undefined)
+					dst[prop] = '' + vars[str];
+			}
 		});
 		return dst;
 	}
-	function nextLoc(script, cmp) {
+	function nextLoc(script, cmp, ignore) {
 		var test;
 		switch (typeof cmp) {
 		case 'string':
-			test = function (c) { return cmp === c; };
+			test = function (c) { return cmp.indexOf(c) !== -1; };
 			break;
 		case 'function':
 			test = cmp;
@@ -1069,20 +1077,95 @@ Sora.Scripter = function (params) {
 			break;
 		}
 		if (test) {
-			for (var i = script.loc, l = script.str.length ; i < l ; ++i) {
-				var c = script.str.charAt(i);
-				if (c === '\\')
-					++i;
-				else if (test(c))
-					return i;
+			var quote = '';
+			for (var i = script.loc + 1, l = script.str.length ; i < l ; ++i) {
+				var c = script.str[i];
+				if (c === '\\') ++i;
+				else {
+					if (ignore) {
+						if (test(c)) return script.loc = i;
+					}
+					else if (quote !== '') {
+						if (quote === c) quote = '';
+					}
+					else {
+						if (c === '\'' || c === '"') quote = c;
+						else if (test(c)) return script.loc = i;
+					}
+				}
 			}
 		}
-		return -1;
+		return script.loc = script.str.length;
 	}
-	this.execute = function (script, params) {
+	function parseParams(str) {
+		var params = {}, script = {str: str, loc: -1};
+		while (script.loc < script.str.length) {
+			var keyStart = nextLoc(script, function (c) { return !isWhitespace(c); }, true);
+			if (keyStart >= script.str.length) break;
+			var keyStop, keyFirst = script.str[keyStart];
+			if (keyFirst === '\'' || keyFirst === '"')
+				++keyStart, keyStop = nextLoc(script, keyFirst, true);
+			else
+				keyStop = nextLoc(script, function (c) { return isWhitespace(c) || c === '='; }, true), keyFirst = '\'';
+			var key = eval(keyFirst + script.str.slice(keyStart, keyStop) + keyFirst);
+			if (script.str[keyStop] !== '=')
+				script.loc = nextLoc(script, '=', true);
+			var valueStart = nextLoc(script, function (c) { return !isWhitespace(c); }, true);
+			if (valueStart >= script.str.length) break;
+			var valueStop, valueFirst = script.str[valueStart];
+			if (valueFirst === '\'' || valueFirst === '"')
+				++valueStart, valueStop = nextLoc(script, valueFirst, true);
+			else
+				valueStop = nextLoc(script, isWhitespace, true), valueFirst = '\'';
+			var value = eval(valueFirst + script.str.slice(valueStart, valueStop) + valueFirst);
+			params[key] = value;
+		}
+		return params;
+	}
+	this.execute = function (script, params, prepare) {
 		if (script.loc === undefined) script.loc = -1;
-		params = params || vars;
-		
+		params = params || {};
+		while (script.loc < script.str.length) {
+			var start = nextLoc(script, '({[');
+			if (start >= script.str.length) break;
+			var type = script.str[start];
+			var stop = nextLoc(script, ')}]'['({['.indexOf(type)]);
+			var subscript = {str: script.str.slice(++start, stop), loc: -1};
+			if (prepare) {
+				switch (type) {
+				case '(':
+					tags[Sora.trim(subscript.str)] = stop;
+					break;
+				case '{':
+					start = nextLoc(subscript, function (c) { return !isWhitespace(c); });
+					stop = nextLoc(subscript, function (c) { return isWhitespace(c) || c === '['; });
+					var method = subscript.str.slice(start, stop);
+					if (typeof cmds[method] !== 'function')
+						cmds[method] = subscript.str.slice(stop);
+					break;
+				default:
+					break;
+				}
+			}
+			else {
+				if (type === '[') {
+					start = nextLoc(subscript, function (c) { return !isWhitespace(c); });
+					stop = nextLoc(subscript, isWhitespace);
+					var method = subscript.str.slice(start, stop);
+					var parsed = parseRef(parseParams(subscript.str.slice(stop)), params);
+					switch (typeof cmds[method]) {
+						case 'function':
+							if (cmds[method](parsed)) return true;
+							break;
+						case 'string':
+							if (scope.execute({str: cmds[method]}, parsed)) return true;
+							break;
+						default:
+							break;
+					}
+				}
+			}
+		}
 		return false;
 	};
 	this.update = function (dt) {
@@ -1091,10 +1174,23 @@ Sora.Scripter = function (params) {
 	};
 	this.save = function (params) {
 		var str;
+		str += '[eval';
+		Sora.foreach(vars, function (prop) {
+			str += ' ' + prop + '=' + vars[prop];
+		});
+		str += ']';
+		Sora.foreach(cmds, function (prop) {
+			if (typeof cmds[prop] === 'string')
+				str += '{' + prop + cmds[prop] + '}';
+		});
 		
+		// stringify layer
+		
+		str += controls.str();
+		str += player.str();
 		str += '[goto ' +
-		Sora.stringify(script.src, 'src') +
-		Sora.stringify(script.loc, 'loc') +
+		Sora.stringify(currScript.src, 'src') +
+		Sora.stringify(currScript.loc, 'loc') +
 		']';
 		
 	};
@@ -1105,10 +1201,11 @@ Sora.Scripter = function (params) {
 		xmlhttp.onreadystatechange = function () {
 			if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
 				controls.enable();
-				script.src = params.src;
-				script.str = xmlhttp.responseText;
-				// parse tags
-				cmds.goto({id: params.id, loc: params.loc});
+				currScript = {src: params.src, str: xmlhttp.responseText};
+				tags = {};
+				scope.execute(currScript, null, true);
+				currScript.loc = -1;
+				cmds['goto']({id: params.id, loc: params.loc});
 			}
 		};
 		xmlhttp.open('GET', params.src, true);
@@ -1128,7 +1225,7 @@ Sora.System = function (params) {
 	var controls = new Sora.Controls({canvas: this.canvas});
 	var player = new Sora.Player();
 	var scripter = new Sora.Scripter({renderer: renderer, controls: controls, player: player, width: width, height: height});
-	scripter.load({src: params.src, id: params.id});
+	scripter.load({src: params.src});
 	var lastTime = 0, animFrame;
 	function animate(currTime) {
 		animFrame = self.requestAnimationFrame(animate);
