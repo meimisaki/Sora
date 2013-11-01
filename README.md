@@ -25,15 +25,15 @@ A simple galgame engine (using <b>webgl</b>)
 	<script type="text/javascript" src="Sora.js"></script>
 	<script type="text/javascript">
 	self.onload = function () {
-		document.body.appendChild(new Sora.System({width: 1024, height: 640}).canvas);
+		document.body.appendChild(new Sora.System({width: 1024, height: 640, src: 'script.txt'}).canvas);
 	};
 	</script>
 
 >Sora-Script below shows how to add a layer and use a defined-method 'fadein' to animate it
 
 	{fadein
-		[action duration=500 opacity='0->1' timing='linear']
-		[action duration=1000 y='-32->0' timing='easeout']}
+		[action target=$target duration=500 opacity='0->1' timing='linear']
+		[action target=$target duration=1000 y='-32->0' timing='easeout']}
 	[layer src='bg.png' id='bg' width=1024 height=640]
 	[layer src='sora.png' id='sora' super='bg']
 	[fadein target='sora']
@@ -80,7 +80,7 @@ Recursion is possible, but not recommended
 	[eval
 	@optional
 		varId1	=	'(a + b) * c / d - e'	// '+-*/()' operators are available, variable such as 'a' should be already defined
-		varId2	=	'x - (1 + 2)'			// numbers are also acceptable
+		varId2	=	'x - (1 + y) * 2'		// numbers are also acceptable
 		...									// order of expressions' evaluation is NOT guaranteed, please use multiple 'eval' to insure the topological order of them
 		varIdN	=	'']						// empty expression will delete the variable
 
@@ -135,6 +135,7 @@ Recursion is possible, but not recommended
 
 	[layer
 	@optional
+		back		=	bool		// default: false
 		x			=	float		// default: 0
 		y			=	float		// default: 0
 		width		=	float		// default: image.width		||	0
@@ -147,7 +148,7 @@ Recursion is possible, but not recommended
 		rotation	=	float		// default: 0	range: (-inf, +inf)
 		opacity		=	float		// default: 1	range: [0, 1]
 		order		=	int			// default: 0	range: (-inf, +inf)
-		id			=	layerId		// default: ''
+		id			=	layerId		// default: null
 		super		=	layerId]	// default: current fore layer
 	[label	// derived from layer
 	@optional
@@ -165,10 +166,11 @@ Recursion is possible, but not recommended
 		callback	=	script]		// default: null
 	[remove
 	@optional
+		back	=	bool		// default: false
 		id		=	layerId		// default: null
-		type	=	layerType]	// default: null
+		type	=	layerType]	// default: null	options: ['layer', 'label', 'button']
 
-**audio**
+**audio & stop**
 
 	[audio
 	@required
@@ -177,8 +179,17 @@ Recursion is possible, but not recommended
 		loop		=	bool		// default: false
 		volume		=	float		// default: 1		range: [0, 1]
 		currentTime	=	float		// default: 0 s		range: [0, audio.duration]
-		id			=	audioId		// default: ''
+		id			=	audioId		// default: null
 		single		=	bool]		// default: false
+	[stop
+	@optional
+		id	=	audioId]	// default: null
+
+**save**
+
+	[save
+	@required
+		]
 
 ##Thanks##
 
