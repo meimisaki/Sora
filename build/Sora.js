@@ -51,32 +51,26 @@ Sora.filter = function (input, callback) {
 	}
 	return input;
 };
-Sora.foreach = function (obj, callback, alternate) {
+Sora.foreach = function (obj, callback) {
 	if (callback) {
-		alternate = alternate || callback;
 		if (Object.keys) {
 			var keys = Object.keys(obj);
-			for (var i = 0, l = keys.length ; i < l ; ++i) {
-				var prop = keys[i];
-				callback(prop);
-			}
+			for (var i = 0, l = keys.length ; i < l ; ++i)
+				callback(keys[i]);
 		}
 		else {
 			var safeHasOwnProperty = {}.hasOwnProperty;
 			for (var prop in obj)
 				if (safeHasOwnProperty.call(obj, prop))
-					alternate(prop);
+					callback(prop);
 		}
 	}
 	return obj;
 };
 Sora.extend = function (obj, src) {
-	Sora.foreach(src, function (prop) {
-		Object.defineProperty(obj, prop, Object.getOwnPropertyDescriptor(src, prop));
-	}, function (prop) {
+	return Sora.foreach(src, function (prop) {
 		obj[prop] = src[prop];
 	});
-	return obj;
 };
 Sora.stringify = function (value, key) {
 	function quote(string) {
@@ -119,6 +113,7 @@ Sora.parseBool = function (str) {
 		return str ? true : false;
 	}
 };
+// make texture's size become POT
 Sora.nextPOT = function (x) {
 	switch (typeof x) {
 	case 'string':
@@ -185,6 +180,7 @@ Sora.EventDispatcher.prototype = {
 		return '';
 	}
 };
+// Texture Cache
 Sora.Texture = function (image, callback) {
 	Sora.EventDispatcher.call(this);
 	this.needsUpdate = false;
@@ -208,6 +204,11 @@ Sora.Texture = function (image, callback) {
 };
 Sora.Texture.prototype = Object.create(Sora.EventDispatcher.prototype);
 Sora.extend(Sora.Texture.prototype, {
+	dealloc: function () {
+		if (this.image instanceof Image)
+			this.image.src = '';
+		Sora.EventDispatcher.prototype.dealloc.call(this);
+	},
 	str: function () {
 		if (this.image instanceof Image)
 			return this.image.src;
@@ -516,10 +517,10 @@ Sora.extend(Sora.Label.prototype, {
 			}
 			return tm;
 		}
-		var i = 0, y = this.height;
-		while (i < this.text.length && y > 0) {
+		var i = 0, y = this.height, text = this.text.slice(0, parseInt(this.text.length * this.start));
+		while (i < text.length && y > 0) {
 			var str, c, l = 0;
-			while (i + l < this.text.length) {
+			while (i + l < text.length) {
 				str = text.slice(i, ++l + i);
 				c = str.slice(-1);
 				if (c === '\r' || c === '\n' || getTextMetrics(this.context, str).width > this.width) {
@@ -807,16 +808,17 @@ Sora.Renderer = function (params) {
 		layer.opacity = opacity;
 		popMatrix();
 	}
-	this.render = function (layer) {
-		if (!layer) return ;
+	this.render = function () {
 		gl.viewport(0, 0, canvas.width, canvas.height);
-		gl.clearColor(0, 0, 0, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT/* | gl.DEPTH_BUFFER_BIT*/);
-		pushMatrix();
-		translate(-1, -1);
-		scale(2 / layer.width, 2 / layer.height);
-		draw(layer);
-		popMatrix();
+		for (var i = 0, l = arguments.length ; i < l ; ++i) {
+			var layer = arguments[i];
+			pushMatrix();
+			translate(-1, -1);
+			scale(2 / layer.width, 2 / layer.height);
+			draw(layer);
+			popMatrix();
+		}
 	};
 	var scope = this;
 	this.snapshot = function (layer) {
@@ -972,6 +974,7 @@ Sora.Scripter = function (params) {
 	var player = params.player;
 	var width = params.width;
 	var height = params.height;
+	// var staticLayer = new Sora.Layer({width: width, height: height});
 	var foreLayer = new Sora.Layer({width: width, height: height});
 	var backLayer = new Sora.Layer({width: width, height: height});
 	var scope = this;
@@ -990,19 +993,26 @@ Sora.Scripter = function (params) {
 		var layers = layer.getLayersByParams(params);
 		return layers.length ? layers : [layer];
 	}
-	var currScript, tags, vars = {}, cmds = {
-		'eval': function (params) {
+	var executions = [];
+	// each execution contains some scripts
+	// if !script.tag execute(prepare = true)
+	var currScript, tags, vars = new Sora.extend(function () {}, {prototype: self}), cmds = {
+		'eval': function (params, self) {
+			// use this[prop], not this.prop
+			// use self to represent current scope
+			vars.self = self;
 			Sora.foreach(params, function (prop) {
-				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[\+\-\*\/\(\)\s]*[\.0-9a-z_]+/ig), function (exp) {
-					var arr = /([\+\-\*\/\(\)\s]*)([\.0-9a-z_]+)/i.exec(exp);
-					return Sora.trim(arr[1]) + (/[\.0-9]/.test(arr[2][0]) ? arr[2] : 'this.' + arr[2]);
+				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[^\.0-9a-z_]*[\.0-9a-z_]+/ig), function (exp) {
+					/([^\.0-9a-z_]*)([\.0-9a-z_]+)/i.test(exp);
+					return Sora.trim(RegExp.$1) + (isNaN(parseFloat(RegExp.$2)) ? 'this.' : '') + RegExp.$2;
 				}).join('') + ';}').call(vars);
 			});
 			return false;
 		},
 		'goto': function (params) {
-			if (params.src)
-				scope.load(params);
+			if (params.src) {
+				return scope.load(params);
+			}
 			else {
 				if (params.id && tags[params.id] !== undefined)
 					currScript.loc = tags[params.id];
@@ -1011,8 +1021,8 @@ Sora.Scripter = function (params) {
 				else
 					currScript.loc = -1;
 				scope.execute(currScript);
+				return true;
 			}
-			return true;
 		},
 		'if': function (params) {
 			cmds.eval({'': params.cond});
@@ -1064,18 +1074,18 @@ Sora.Scripter = function (params) {
 			return false;
 		},
 		'layer': function (params) {
-			getLayers({id: params.super, back: params.back})[0].addSublayer(new Sora.Layer(params));
+			getLayers({id: params['super'], back: params.back})[0].addSublayer(new Sora.Layer(params));
 			return false;
 		},
 		'label': function (params) {
-			getLayers({id: params.super, back: params.back})[0].addSublayer(new Sora.Label(params));
+			getLayers({id: params['super'], back: params.back})[0].addSublayer(new Sora.Label(params));
 			return false;
 		},
 		'button': function (params) {
 			var button = new Sora.Button(params);
 			button.addEventListener('dealloc', onButtonDealloc);
 			button.addEventListener('mouseup', onButtonMouseUp);
-			getLayers({id: params.super, back: params.back})[0].addSublayer(button);
+			getLayers({id: params['super'], back: params.back})[0].addSublayer(button);
 			return false;
 		},
 		'remove': function (params) {
