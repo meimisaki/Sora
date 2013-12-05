@@ -7,13 +7,37 @@ Sora
 
 A simple galgame engine (using <b>webgl</b>)
 
+<b><i>I'm really sorry that I have to suspend this project for some time</i></b>
+
+<b><i>Too many affairs of reality prevent me from keeping it on</i></b>
+
+<b><i>And I finally realize how naive I am</i></b>
+
+<b><i>Design a script without any base of compiler principle is so difficult</i></b>
+
+<b><i>I will restart this project some day</i></b>
+
 ###cn###
 
 一个简易美少女游戏引擎 （使用<b>webgl</b>）
 
+<b><i>因为三次元事物繁多而中断这个项目我表示十分抱歉</i></b>
+
+<b><i>然后，我总算意识到了自己的天真，没有编译原理的基础而想要设计一个脚本什么的实在是不太现实</i></b>
+
+<b><i>在将来的某天，这个项目会再一次启动</i></b>
+
 ###ja###
 
 たったの簡単なガルゲーエンジンです　（<b>webgl</b>を使って）
+
+<b><i>三次元の仕事が多過ぎるって、このプロジェクトを中断するなんて、本当にごめん</i></b>
+
+<b><i>そして、あたし自身はどれだけ甘いって、やっと気付いた</i></b>
+
+<b><i>コンパイラ原理も勉強してなかったから、スクリプトを設計するのは無理だ</i></b>
+
+<b><i>いつか必ずこのプロジェクトを再起動します</i></b>
 
 ##Usage##
 
@@ -58,6 +82,8 @@ Each argument forms as **'key = value'**, key & value is separated by a equal si
 
 Key & value are **ALWAYS** treated as **strings**, so they could be wrapped in quotes('' & "")
 
+Value begins with **'$'** is a reference of other value, and value begins with **'@'** means this value should be evaluated
+
 	[method key1=value1 key2=value2 ...]
 
 ####braces {}####
@@ -79,10 +105,11 @@ Recursion is possible, but not recommended
 
 	[eval
 	@optional
-		varId1	=	'(a + b) * c / d - e'	// '+-*/()' operators are available, variable such as 'a' should be already defined
-		varId2	=	'x - (1 + y) * 2'		// numbers are also acceptable
-		...									// order of expressions' evaluation is NOT guaranteed, please use multiple 'eval' to insure the topological order of them
-		varIdN	=	'']						// empty expression will delete the variable
+		varId1	=	'this.Math.floor(this.x / 2)'	// 'this' inherit from self(eg..window, the global environment)
+		varId2	=	'this.getLayer("msg|static").y'	// 'getLayer' returns a layer which id is equal to the argument, use 'id|root' to filter, root is 'fore', 'back' or 'static'
+		varId3	=	'this.getAudio("bgm").volume'	// 'getAudio' returns an array of audios which id is equal to the argument
+		...											// order of expressions' evaluation is NOT guaranteed, please use multiple 'eval' to insure the topological order of them
+		varIdN	=	'']								// empty expression will delete the variable
 
 **goto**
 
@@ -103,8 +130,8 @@ Recursion is possible, but not recommended
 
 **wait & next**
 
-	[wait]	// break current execution
-	[next]	// continue to execute current script
+	[wait]	// pause current execution
+	[next]	// continue to execute root script
 
 **trans**
 
@@ -118,7 +145,7 @@ Recursion is possible, but not recommended
 
 	[action
 	@required
-		target		=	layerId
+		target		=	layerId			// similar to 'getLayer'
 	@optional
 		duration	=	int				// default: 1000 ms		range: [1, +inf)
 		elapsed		=	int				// default: 0 ms		range: [0, duration * repeat]
@@ -135,7 +162,6 @@ Recursion is possible, but not recommended
 
 	[layer
 	@optional
-		back		=	bool		// default: false
 		x			=	float		// default: 0
 		y			=	float		// default: 0
 		width		=	float		// default: image.width		||	0
@@ -149,7 +175,8 @@ Recursion is possible, but not recommended
 		opacity		=	float		// default: 1	range: [0, 1]
 		order		=	int			// default: 0	range: (-inf, +inf)
 		id			=	layerId		// default: null
-		super		=	layerId]	// default: current fore layer
+		super		=	layerId]	// default: back layer, similar to 'getLayer'
+
 	[label	// derived from layer
 	@optional
 		text	=	someText		// default: ''
@@ -166,8 +193,7 @@ Recursion is possible, but not recommended
 		callback	=	script]		// default: null
 	[remove
 	@optional
-		back	=	bool		// default: false
-		id		=	layerId		// default: null
+		id		=	layerId		// default: null, similar to 'getLayer', use trick '|root' to remove all layers in a specific root is available
 		type	=	layerType]	// default: null	options: ['layer', 'label', 'button']
 
 **audio & stop**

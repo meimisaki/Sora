@@ -72,6 +72,7 @@ Sora.extend = function (obj, src) {
 		obj[prop] = src[prop];
 	});
 };
+// issue: escape '$' & '@' to avoid reference & evaluate
 Sora.stringify = function (value, key) {
 	function quote(string) {
 		var escapable = /[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g, meta = {
@@ -451,8 +452,7 @@ Sora.extend(Sora.Layer.prototype, {
 	},
 	name: 'layer',
 	params: function () {
-		return Sora.stringify(true, 'back') +
-		Sora.stringify(this.x, 'x') +
+		return Sora.stringify(this.x, 'x') +
 		Sora.stringify(this.y, 'y') +
 		Sora.stringify(this.width, 'width') +
 		Sora.stringify(this.height, 'height') +
@@ -808,9 +808,11 @@ Sora.Renderer = function (params) {
 		layer.opacity = opacity;
 		popMatrix();
 	}
-	this.render = function () {
+	this.clear = function () {
 		gl.viewport(0, 0, canvas.width, canvas.height);
 		gl.clear(gl.COLOR_BUFFER_BIT/* | gl.DEPTH_BUFFER_BIT*/);
+	};
+	this.render = function () {
 		for (var i = 0, l = arguments.length ; i < l ; ++i) {
 			var layer = arguments[i];
 			pushMatrix();
@@ -837,6 +839,7 @@ Sora.Renderer = function (params) {
 		bindTexture(texture);
 		//gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
 		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture.texture, 0);
+		scope.clear();
 		scope.render(layer);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.deleteFramebuffer(fb);
@@ -974,14 +977,15 @@ Sora.Scripter = function (params) {
 	var player = params.player;
 	var width = params.width;
 	var height = params.height;
-	// var staticLayer = new Sora.Layer({width: width, height: height});
-	var foreLayer = new Sora.Layer({width: width, height: height});
-	var backLayer = new Sora.Layer({width: width, height: height});
+	var root = {
+		'static': new Sora.Layer({width: width, height: height}),
+		'fore': new Sora.Layer({width: width, height: height}),
+		'back': new Sora.Layer({width: width, height: height})
+	};
 	var scope = this;
 	function onButtonMouseUp(event) {
 		var button = event.target;
-		if (button.callback)
-			scope.execute({str: button.callback});
+		// execute callback in a new execution
 	}
 	function onButtonDealloc(event) {
 		var button = event.target;
@@ -989,23 +993,34 @@ Sora.Scripter = function (params) {
 		button.removeEventListener('dealloc', onButtonDealloc);
 	}
 	function getLayers(params) {
-		var layer = (params.back ? Sora.parseBool(params.back) : false) ? backLayer : foreLayer;
-		var layers = layer.getLayersByParams(params);
-		return layers.length ? layers : [layer];
+		var filter;
+		if (params.id !== undefined) {
+			/([^\|]*)\|?(fore|back|static)?/.test(params.id);
+			params.id = RegExp.$1 || undefined;
+			filter = RegExp.$2;
+		}
+		var layers = [], keys = ['back', 'fore', 'static'];
+		for (var i = 0, l = keys.length ; i < l ; ++i)
+			if (filter === undefined || filter === keys[i])
+				layers = layers.concat(root[keys[i]].getLayersByParams(params));
+		return layers.length ? layers : filter ? [root[filter]] : [root.back];
 	}
 	var executions = [];
 	// each execution contains some scripts
 	// if !script.tag execute(prepare = true)
-	var currScript, tags, vars = new Sora.extend(function () {}, {prototype: self}), cmds = {
+	var currScript, tags;
+	var vars = Sora.extend(new Sora.extend(function () {}, {prototype: self}), {
+		getLayer: function (id) {
+			return getLayers({id: id})[0];
+		},
+		getAudio: function (id) {
+			// player.get
+		},
+	});
+	var cmds = {
 		'eval': function (params, self) {
-			// use this[prop], not this.prop
-			// use self to represent current scope
-			vars.self = self;
 			Sora.foreach(params, function (prop) {
-				vars[prop] = new Function('{return ' + Sora.map(params[prop].match(/[^\.0-9a-z_]*[\.0-9a-z_]+/ig), function (exp) {
-					/([^\.0-9a-z_]*)([\.0-9a-z_]+)/i.test(exp);
-					return Sora.trim(RegExp.$1) + (isNaN(parseFloat(RegExp.$2)) ? 'this.' : '') + RegExp.$2;
-				}).join('') + ';}').call(vars);
+				vars[prop] = new Function('{return ' + params[prop] + ';}').call(vars);
 			});
 			return false;
 		},
@@ -1051,21 +1066,24 @@ Sora.Scripter = function (params) {
 				layer.removeFromSuperlayer();
 				layer.dealloc();
 				cmds['next']();
+				// continue current execution, not root execution
 			}
-			layer.texture = renderer.snapshot(foreLayer);
-			foreLayer.dealloc();
-			foreLayer = backLayer;
-			foreLayer.addSublayer(layer);
-			backLayer = new Sora.Layer({width: width, height: height});
-			if (params.src)
+			layer.texture = renderer.snapshot(root.fore);
+			root.fore.dealloc();
+			root.fore = root.back;
+			root.fore.addSublayer(layer);
+			root.back = new Sora.Layer({width: width, height: height});
+			if (params.src) {
 				var mask = new Sora.Texture(params.src, function () {
 					layer.mask = mask;
 					layer.progress = 0;
 					layer.offset = params.offset ? Math.max(0, Math.min(1, parseFloat(params.offset))) : 0;
 					controls.start(new Sora.Action({target: layer, duration: params.duration, progress: '1', callback: callback}));
 				});
-			else
+			}
+			else {
 				controls.start(new Sora.Action({target: layer, duration: params.duration, opacity: '0', callback: callback}));
+			}
 			return true;
 		},
 		'action': function (params) {
@@ -1074,25 +1092,25 @@ Sora.Scripter = function (params) {
 			return false;
 		},
 		'layer': function (params) {
-			getLayers({id: params['super'], back: params.back})[0].addSublayer(new Sora.Layer(params));
+			getLayers({id: params['super']})[0].addSublayer(new Sora.Layer(params));
 			return false;
 		},
 		'label': function (params) {
-			getLayers({id: params['super'], back: params.back})[0].addSublayer(new Sora.Label(params));
+			getLayers({id: params['super']})[0].addSublayer(new Sora.Label(params));
 			return false;
 		},
 		'button': function (params) {
 			var button = new Sora.Button(params);
 			button.addEventListener('dealloc', onButtonDealloc);
 			button.addEventListener('mouseup', onButtonMouseUp);
-			getLayers({id: params['super'], back: params.back})[0].addSublayer(button);
+			getLayers({id: params['super']})[0].addSublayer(button);
 			return false;
 		},
 		'remove': function (params) {
 			var layers = getLayers(params);
 			for (var i = layers.length - 1 ; i >= 0 ; --i) {
 				var layer = layers[i];
-				if (layer !== foreLayer && layer !== backLayer) {
+				if (layer !== root.fore && layer !== root.back && layer !== root['static']) {
 					layer.removeFromSuperlayer();
 					layer.dealloc();
 				}
@@ -1122,9 +1140,9 @@ Sora.Scripter = function (params) {
 				if (typeof cmds[prop] === 'string')
 					str += '{' + prop + cmds[prop] + '}';
 			});
-			str += foreLayer.str();
+			str += root.fore.str();
 			str += '[trans]';
-			str += backLayer.str();
+			str += root.back.str();
 			str += controls.str();
 			str += player.str();
 			str += '[goto ' +
@@ -1241,11 +1259,13 @@ Sora.Scripter = function (params) {
 					stop = nextLoc(subscript, isWhitespace);
 					var method = subscript.str.slice(start, stop);
 					var parsed = parseRef(parseParams(subscript.str.slice(stop)), params);
+					// evaluate parsed params
 					switch (typeof cmds[method]) {
 						case 'function':
 							if (cmds[method](parsed)) return true;
 							break;
 						case 'string':
+							// push a new script into current execution
 							if (scope.execute({str: cmds[method]}, parsed)) return true;
 							break;
 						default:
@@ -1258,7 +1278,8 @@ Sora.Scripter = function (params) {
 	};
 	this.update = function (dt) {
 		controls.update(dt);
-		renderer.render(foreLayer);
+		renderer.clear();
+		renderer.render(root.fore, root['static']);
 	};
 	this.load = function (params) {
 		if (params.src !== undefined) {
